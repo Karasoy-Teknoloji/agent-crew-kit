@@ -4,7 +4,7 @@ A team kit for [Claude Code](https://docs.claude.com/en/docs/claude-code): a lad
 
 It grew out of the day-to-day setup of a small software team and is published as-is. **Everything is optional**: nothing is forced on anyone, there are no managed settings. Take the parts you want, change them, or keep your own variant on a branch.
 
-The kit started in a Turkish-speaking team and was converted to English for everyone. Tool names, flags, messages and docs are English; a few literal tokens that the evidence hook matches (`Karar kaydı`, `doğrulanmadı`, `Ürün kararları`) are kept as they are, because the hook and its tests quote them.
+The kit started in a Turkish-speaking team and was converted to English for everyone. Tool names, flags, messages and docs are English.
 
 > Not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC.
 
@@ -75,7 +75,7 @@ Edit the rule files on that branch and commit. Changes on `main` reach you only 
 
 ### Evidence hook
 
-`tools/evidence_hook.py` blocks the assistant's final message when it (1) hedges ("probably", "likely", ...), (2) claims missing access or asks for a credential without a `vault_cli.py find` search in the same turn, or (3) answers a decision from the user without recording it on GitHub (or a `Karar kaydı: ...` line). It never loops and fails open. The installer registers it for `Stop` and `SubagentStop`.
+`tools/evidence_hook.py` blocks the assistant's final message when it (1) hedges ("probably", "likely", ...), (2) claims missing access or asks for a credential without a `vault_cli.py find` search in the same turn, or (3) answers a decision from the user without recording it on GitHub (or a `Decision record: ...` line). It never loops and fails open. The installer registers it for `Stop` and `SubagentStop`.
 
 ## Configuration
 
