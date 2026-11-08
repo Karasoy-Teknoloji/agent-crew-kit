@@ -490,7 +490,7 @@ SECRET_PLACEHOLDER = re.compile(
     r"|<(?:[a-z]+(?:[ _.\-][a-z0-9]+)*|[A-Z]+(?:[ _.\-][A-Z0-9]+)*)>"  # <your-password>, <DB_PASS>; `<Secret123>` is a password
     r"|%(?:" + _SECRET_VAR_NAME + r"|[a-z]+(?:_[a-z0-9]+)*)%"  # %DB_PASS%, %appdata%; `%Pass9%` is a password
     r"|\{\{[^{}]*\}\}"  # {{ secrets.pw }}
-    r"|\[KEY:masked\]|\[[A-Z]+:[0-9a-f]{6,8}\]"  # already masked ([SECRET:xxxxxx], [PHONE:xxxxxx] ...; 6 hex from older versions, 8 now)
+    r"|\[KEY:masked\]|\[[A-Z_]+:[0-9a-f]{6,8}\]"  # already masked ([SECRET:xxxxxx], [PHONE:xxxxxx] ...; 6 hex from older versions, 8 now)
     r"|[*\u2022xX.#\-_]+")  # ****, xxxx
 
 
@@ -909,7 +909,7 @@ def _resolve(t):
 
 
 _RAW = None  # while set (a list), the identifier callbacks record (raw text, token) for every value they mask
-RE_TOKEN = re.compile(r"\[([A-Z]+):[0-9a-f]{8}\]")
+RE_TOKEN = re.compile(r"\[([A-Z_]+):[0-9a-f]{8}\]")
 
 
 def _record(ham, tok):

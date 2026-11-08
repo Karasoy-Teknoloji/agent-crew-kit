@@ -1468,7 +1468,7 @@ class Round3Digits(unittest.TestCase):
 
     def assertMasked(self, text, raw, turn):
         y, s = trim.mask_out(text)
-        self.assertNotIn(raw, re.sub(r"\D", "", re.sub(r"\[[A-Z]+:[0-9a-f]{8}\]", "", y)), text.encode("unicode_escape").decode())
+        self.assertNotIn(raw, re.sub(r"\D", "", re.sub(r"\[[A-Z_]+:[0-9a-f]{8}\]", "", y)), text.encode("unicode_escape").decode())
         self.assertGreaterEqual(s[turn], 1, text.encode("unicode_escape").decode())
 
     def test_tr_id_glued_to_letters_dots_and_underscores(self):
