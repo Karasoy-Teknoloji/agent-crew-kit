@@ -2,12 +2,12 @@
 
 ## Not a guarantee
 
-`kirp.py` is a **best-effort safety net**. Regex masking of untrusted free text can never be complete: new encodings, layouts
+`trim.py` is a **best-effort safety net**. Regex masking of untrusted free text can never be complete: new encodings, layouts
 and key names will always exist (see "Known limits"). The control is the rule itself: **do not read raw personal data**
 (production rows, logs with identifiers) - use counts, aggregates and masked samples, and mask at the source (the query,
 the export, the service) before anything reaches a tool. The hook catches the common slips; it does not make raw reads safe.
 
-`kirp.py` masks raw personal data in tool output before the model sees it, and truncates very large output.
+`trim.py` masks raw personal data in tool output before the model sees it, and truncates very large output.
 
 Nothing is installed or enabled by default. Use the hook, the filter, or neither.
 
@@ -125,14 +125,14 @@ Add to `~/.claude/settings.json` (user scope; never inside a repo). Replace the 
         "matcher": "Bash",
         "hooks": [
           { "type": "command", "command": "/usr/bin/python3",
-            "args": ["-I", "/path/to/claude-shared/tools/data-masking/kirp.py", "--hook"], "timeout": 30 }
+            "args": ["-I", "/path/to/claude-shared/tools/data-masking/trim.py", "--hook"], "timeout": 30 }
         ]
       },
       {
         "matcher": "mcp__grafana.*|mcp__plugin_grafana-mcp_grafana.*|mcp__plugin_slack_slack__.*|mcp__claude-in-chrome__(get_page_text|read_page|find|javascript_tool|read_network_requests|read_console_messages)|Read|Grep",
         "hooks": [
           { "type": "command", "command": "/usr/bin/python3",
-            "args": ["-I", "/path/to/claude-shared/tools/data-masking/kirp.py", "--hook"], "timeout": 30 }
+            "args": ["-I", "/path/to/claude-shared/tools/data-masking/trim.py", "--hook"], "timeout": 30 }
         ]
       }
     ]
@@ -155,11 +155,11 @@ The hook does not fire for a failed Bash command, so pipe production reads throu
 command fails:
 
 ```
-<command> 2>&1 | python3 -I /path/to/claude-shared/tools/data-masking/kirp.py
+<command> 2>&1 | python3 -I /path/to/claude-shared/tools/data-masking/trim.py
 ```
 
-Use `set -o pipefail` in the shell if you need the exit code. Python callers can `import kirp` and use
-`kirp.mask_out(text) -> (masked_text, Counter)`; it never raises and never returns text it could not mask.
+Use `set -o pipefail` in the shell if you need the exit code. Python callers can `import trim` and use
+`trim.mask_out(text) -> (masked_text, Counter)`; it never raises and never returns text it could not mask.
 
 ## Files and settings
 
@@ -221,7 +221,7 @@ So masking is built to finish early and to fail closed:
   the end of the text). A single line or block over 8 MB is withheld with `[mask: line too long, N lines withheld]`.
   `test_trim.py` (`Boundary`) places every class of match exactly across the old cut and checks that masking in small pieces
   equals masking the text at once.
-- The budget starts when the input has been read completely: a slow producer (`(sleep 8; cmd) | kirp.py`) does not use it up.
+- The budget starts when the input has been read completely: a slow producer (`(sleep 8; cmd) | trim.py`) does not use it up.
 - Second line of defence: on POSIX a `SIGALRM` interrupts a piece that is still running when the budget ends (CPython's regex
   engine checks signals), so even a future catastrophic pattern cannot hold the hook past the budget.
 - Huge trees: the walk over an MCP / Grep response checks the budget at every node (by the clock every 1024 nodes, so a tree of

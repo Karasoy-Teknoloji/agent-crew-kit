@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Tests for kirp.py (masking hook / filter). SYNTHETIC DATA ONLY (generated TCKN/IBAN/card numbers, made-up phone numbers
+"""Tests for trim.py (masking hook / filter). SYNTHETIC DATA ONLY (generated TCKN/IBAN/card numbers, made-up phone numbers
 and e-mail addresses).
 
-Run:  python3 tools/veri-maskeleme/test_kirp.py -v     (or: python3 -m unittest discover -s tools/veri-maskeleme)
-The module-level tests use a temporary key file, count log and allowlist (KIRP_KEY_FILE, KIRP_COUNT_LOG, KIRP_ALLOWLIST);
-the hook tests run kirp.py as a real process with HOME pointed at a temporary directory. Nothing under the real ~/.claude
+Run:  python3 tools/data-masking/test_trim.py -v     (or: python3 -m unittest discover -s tools/data-masking)
+The module-level tests use a temporary key file, count log and allowlist (TRIM_KEY_FILE, TRIM_COUNT_LOG, TRIM_ALLOWLIST);
+the hook tests run trim.py as a real process with HOME pointed at a temporary directory. Nothing under the real ~/.claude
 is read or written.
 """
 import collections
@@ -23,20 +23,20 @@ import warnings
 
 warnings.simplefilter("ignore", ResourceWarning)
 if os.name == "nt":   # the hook is Linux only (README: "Tested on Linux only"; key-file modes, paths and the time limits assume it)
-    raise unittest.SkipTest("veri-maskeleme is Linux only")
+    raise unittest.SkipTest("data-masking is Linux only")
 BIN = os.path.dirname(os.path.abspath(__file__))
 
 # Isolate the in-process tests (and the child processes they start) from the real ~/.claude.
-_ISO = tempfile.mkdtemp(prefix="kirp-iso-")
+_ISO = tempfile.mkdtemp(prefix="trim-iso-")
 atexit.register(shutil.rmtree, _ISO, ignore_errors=True)
-os.environ["KIRP_KEY_FILE"] = os.path.join(_ISO, "key")
-os.environ["KIRP_COUNT_LOG"] = os.path.join(_ISO, "count.log")
-os.environ["KIRP_ALLOWLIST"] = os.path.join(_ISO, "allowlist.txt")  # does not exist: only the built-in domains apply
+os.environ["TRIM_KEY_FILE"] = os.path.join(_ISO, "key")
+os.environ["TRIM_COUNT_LOG"] = os.path.join(_ISO, "count.log")
+os.environ["TRIM_ALLOWLIST"] = os.path.join(_ISO, "allowlist.txt")  # does not exist: only the built-in domains apply
 
 sys.path.insert(0, BIN)
 import trim  # noqa: E402
 
-TRIM = os.path.join(BIN, "kirp.py")
+TRIM = os.path.join(BIN, "trim.py")
 
 
 def tckn_generate(seed):
@@ -228,7 +228,7 @@ class Masking(unittest.TestCase):
 
     def test_token_stable_across_processes(self):
         t = tckn_generate(13)
-        output = subprocess.run([sys.executable, "-I", "-c", "import sys;sys.path.insert(0,%r);import kirp;print(kirp.maskele(%r)[0])" % (BIN, t)],
+        output = subprocess.run([sys.executable, "-I", "-c", "import sys;sys.path.insert(0,%r);import trim;print(trim.mask_out(%r)[0])" % (BIN, t)],
                                capture_output=True, text=True).stdout.strip()
         self.assertEqual(output, trim.mask_out(t)[0])
 
@@ -268,10 +268,10 @@ class Masking(unittest.TestCase):
 
 
 class Hook(unittest.TestCase):
-    """kirp.py --hook as a real process; HOME is a temporary directory."""
+    """trim.py --hook as a real process; HOME is a temporary directory."""
 
     def setUp(self):
-        self.home = tempfile.mkdtemp(prefix="maske-test-")
+        self.home = tempfile.mkdtemp(prefix="mask-test-")
         os.makedirs(os.path.join(self.home, ".claude"), exist_ok=True)
 
     def tearDown(self):
@@ -279,9 +279,9 @@ class Hook(unittest.TestCase):
 
     def run_hook(self, payload, raw=False, env=None):
         e = dict(os.environ, HOME=self.home)
-        for k in ("KIRP_KAPALI", "KIRP_KEY_FILE", "KIRP_COUNT_LOG", "KIRP_ALLOWLIST"):
+        for k in ("TRIM_CLOSED", "TRIM_KEY_FILE", "TRIM_COUNT_LOG", "TRIM_ALLOWLIST"):
             e.pop(k, None)
-        e.pop("KIRP_MASKE_KAPALI", None)
+        e.pop("TRIM_MASK_CLOSED", None)
         e.update(env or {})
         p = subprocess.run([sys.executable, "-I", TRIM, "--hook"], input=payload if raw else json.dumps(payload),
                            capture_output=True, text=True, env=e, timeout=60)
@@ -318,7 +318,7 @@ class Hook(unittest.TestCase):
 
     def test_bash_no_match_no_output(self):
         self.assertIsNone(self.updated(self.bash("ls", "a\nb\n10.0.0.1 port 5432\n")))
-        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude", "tool-cikti")))
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude", "tool-output")))
 
     def test_bash_big_output_truncated_and_stored_copy_masked(self):
         t = tckn_generate(23)
@@ -327,7 +327,7 @@ class Hook(unittest.TestCase):
         u = self.updated(self.bash("psql", "\n".join(lines) + "\n"))
         self.assertIn("truncated", u["stdout"])
         self.assertNotRegex(u["stdout"], r"\b\d{11}\b")
-        d = os.path.join(self.home, ".claude", "tool-cikti")
+        d = os.path.join(self.home, ".claude", "tool-output")
         files = os.listdir(d)
         self.assertEqual(len(files), 1)
         content = open(os.path.join(d, files[0]), encoding="utf-8").read()
@@ -347,7 +347,7 @@ class Hook(unittest.TestCase):
         self.assertNotIn("persistedOutputPath", u)
         self.assertNotIn(t, open(path).read())  # the raw copy was masked in place
         self.assertNotRegex(u["stdout"], r"\b\d{11}\b")
-        d = os.path.join(self.home, ".claude", "tool-cikti")
+        d = os.path.join(self.home, ".claude", "tool-output")
         for f in os.listdir(d):
             self.assertNotIn(t, open(os.path.join(d, f)).read())
 
@@ -389,7 +389,7 @@ class Hook(unittest.TestCase):
         t = tckn_generate(27)
         g = lambda path: {"tool_name": "Read", "tool_input": {"file_path": path},
                          "tool_response": {"type": "text", "file": {"filePath": path, "content": f"tc {t}", "numLines": 1}}}
-        u = self.updated(g("/tmp/maske-test-output.csv"))
+        u = self.updated(g("/tmp/mask-test-output.csv"))
         self.assertNotIn(t, u["file"]["content"])
         self.assertEqual(u["file"]["numLines"], 1)
         self.assertIsNone(self.updated(g("/opt/repo/x/Test.cs")))
@@ -405,7 +405,7 @@ class Hook(unittest.TestCase):
     def test_key_created_0600_and_stable(self):
         t = tckn_generate(28)
         u1 = self.updated(self.bash("x", f"{t}\n"))["stdout"]
-        path = os.path.join(self.home, ".claude", ".maske-anahtari")
+        path = os.path.join(self.home, ".claude", ".mask-key")
         self.assertEqual(oct(os.stat(path).st_mode & 0o777), "0o600")
         k1 = open(path).read()
         u2 = self.updated(self.bash("x", f"{t}\n"))["stdout"]
@@ -419,18 +419,18 @@ class Hook(unittest.TestCase):
         t = tckn_generate(33)
         custom = os.path.join(self.home, "elsewhere", "my.key")
         os.makedirs(os.path.dirname(custom))
-        out = self.updated(self.bash("x", f"{t}\n"), env={"KIRP_KEY_FILE": custom})["stdout"]
+        out = self.updated(self.bash("x", f"{t}\n"), env={"TRIM_KEY_FILE": custom})["stdout"]
         self.assertNotIn(t, out)
         self.assertEqual(oct(os.stat(custom).st_mode & 0o777), "0o600")
-        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude", ".maske-anahtari")))
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude", ".mask-key")))
         # the same key gives the same token on the next run
-        self.assertEqual(out, self.updated(self.bash("x", f"{t}\n"), env={"KIRP_KEY_FILE": custom})["stdout"])
+        self.assertEqual(out, self.updated(self.bash("x", f"{t}\n"), env={"TRIM_KEY_FILE": custom})["stdout"])
 
     def test_count_log_counts_only(self):
         t = tckn_generate(29)
         self.updated(self.bash("x", f"{t} 05321234567 ali@gmail.com\n"))
-        log = open(os.path.join(self.home, ".claude", "maske-sayac.log"), encoding="utf-8").read()
-        self.assertRegex(log, r"arac=Bash EPOSTA=1 TCKN=1 TEL=1")
+        log = open(os.path.join(self.home, ".claude", "mask-count.log"), encoding="utf-8").read()
+        self.assertRegex(log, r"tool=Bash EPOSTA=1 TCKN=1 TEL=1")
         for raw in (t, "05321234567", "ali@gmail.com", "gmail"):
             self.assertNotIn(raw, log)
 
@@ -446,7 +446,7 @@ class Hook(unittest.TestCase):
 
     def test_disable_env_var(self):
         t = tckn_generate(30)
-        self.assertIsNone(self.updated(self.bash("x", f"{t}\n"), env={"KIRP_MASKE_KAPALI": "1"}))
+        self.assertIsNone(self.updated(self.bash("x", f"{t}\n"), env={"TRIM_MASK_CLOSED": "1"}))
 
     def test_hook_truncation_behaviour(self):
         # below the threshold and no match: no change; above it: truncated (even when nothing matched for masking)
@@ -465,13 +465,13 @@ class Hook(unittest.TestCase):
         self.assertNotIn("QUJD", json.dumps(u))
 
     def test_budget_zero_withholds_everything_in_the_process(self):
-        u = self.updated(self.bash("curl x", "user=a\npassword: Zx9-Synthetic-Value-1234\n"), env={"KIRP_MASKE_SURE": "0"})
+        u = self.updated(self.bash("curl x", "user=a\npassword: Zx9-Synthetic-Value-1234\n"), env={"TRIM_MASK_DURATION": "0"})
         self.assertEqual(u["stdout"], "[mask: time budget exceeded, 2 lines withheld]\n")
 
     def test_budget_is_shared_by_stdout_and_stderr(self):
         r = self.bash("curl x", "ok\n")
         r["tool_response"]["stderr"] = "password: Zx9-Synthetic-Value-1234\n"
-        u = self.updated(r, env={"KIRP_MASKE_SURE": "0"})
+        u = self.updated(r, env={"TRIM_MASK_DURATION": "0"})
         self.assertNotIn("Zx9-Synthetic", json.dumps(u))
 
 
@@ -719,7 +719,7 @@ class Robustness(unittest.TestCase):
             self.assertLess(time.perf_counter() - t0, self.LIMIT, cmd[:20])
 
     def test_budget_is_capped_below_the_hook_timeout(self):
-        p = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, %r); import kirp; print(kirp.MASKE_SURE)" % BIN],
+        p = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, %r); import trim; print(trim.MASK_DURATION)" % BIN],
                            capture_output=True, text=True, env=dict(os.environ, TRIM_MASK_DURATION="999"))
         self.assertEqual(float(p.stdout), 20.0, p.stderr)
         self.assertLess(trim.MASK_DURATION_MAX, 30)
@@ -1131,10 +1131,10 @@ class Round2Medium(unittest.TestCase):
 
     def test_slow_hook_producer_is_not_withheld(self):
         tc = tckn_generate(67)
-        home = tempfile.mkdtemp(prefix="maske-test-")
+        home = tempfile.mkdtemp(prefix="mask-test-")
         try:
             e = dict(os.environ, HOME=home, TRIM_MASK_DURATION="1")
-            for k in ("KIRP_KEY_FILE", "KIRP_COUNT_LOG", "KIRP_ALLOWLIST"):
+            for k in ("TRIM_KEY_FILE", "TRIM_COUNT_LOG", "TRIM_ALLOWLIST"):
                 e.pop(k, None)
             p = subprocess.Popen([sys.executable, "-I", TRIM, "--hook"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=e)
             time.sleep(2.2)
@@ -1165,14 +1165,14 @@ class Round2Low(unittest.TestCase):
         self.assertEqual(self.m("[KEY:masked]"), "[KEY:masked]")
 
     def test_key_literal_is_masked_in_the_hook(self):
-        home = tempfile.mkdtemp(prefix="maske-test-")
+        home = tempfile.mkdtemp(prefix="mask-test-")
         try:
             key = "ab12" * 16
             kf = os.path.join(home, "k")
             with open(os.open(kf, os.O_WRONLY | os.O_CREAT, 0o600), "w") as f:
                 f.write(key)
             e = dict(os.environ, HOME=home, TRIM_KEY_FILE=kf)
-            for k in ("KIRP_COUNT_LOG", "KIRP_ALLOWLIST"):
+            for k in ("TRIM_COUNT_LOG", "TRIM_ALLOWLIST"):
                 e.pop(k, None)
             payload = {"tool_name": "Bash", "tool_input": {"command": "cat k"},
                        "tool_response": {"stdout": key + "\n", "stderr": "", "interrupted": False, "isImage": False}}
@@ -1749,10 +1749,10 @@ class Round3Credentials(unittest.TestCase):
 
 
 class Round3HookBase(unittest.TestCase):
-    """kirp.py --hook as a real process (helpers only)."""
+    """trim.py --hook as a real process (helpers only)."""
 
     def setUp(self):
-        self.home = tempfile.mkdtemp(prefix="maske-test-")
+        self.home = tempfile.mkdtemp(prefix="mask-test-")
         os.makedirs(os.path.join(self.home, ".claude"), exist_ok=True)
 
     def tearDown(self):
@@ -1760,7 +1760,7 @@ class Round3HookBase(unittest.TestCase):
 
     def run_hook(self, payload, raw=False):
         e = dict(os.environ, HOME=self.home)
-        for k in ("KIRP_KAPALI", "KIRP_KEY_FILE", "KIRP_COUNT_LOG", "KIRP_ALLOWLIST", "KIRP_MASKE_KAPALI"):
+        for k in ("TRIM_CLOSED", "TRIM_KEY_FILE", "TRIM_COUNT_LOG", "TRIM_ALLOWLIST", "TRIM_MASK_CLOSED"):
             e.pop(k, None)
         p = subprocess.run([sys.executable, "-I", TRIM, "--hook"], input=payload if raw else json.dumps(payload).encode(),
                            capture_output=True, env=e, timeout=60)
