@@ -28,16 +28,16 @@ from hidden_loader import hidden  # noqa: E402  (one hidden-launch helper)
 WINDOWS = os.name == "nt"
 MARKER = "python3-shim"   # marker of the shim files we write; we never touch a python3 file without it
 TESSDATA_URL = "https://github.com/tesseract-ocr/tessdata_fast/raw/main/%s.traineddata"
-REQUIRED, RECOMMENDED, OPTIONAL_LINKED = "required", "recommended", "istege bagli"
+REQUIRED, RECOMMENDED, OPTIONAL = "required", "recommended", "optional"
 
 
 class Tool:
-    """One tool. komutlar: any one of these on PATH counts as present. winget/apt/brew: package ids; pip: a Python package (the
-    name is imported, never run); elle: the manual hint, used where no package is listed or the OS is in manual_os (a system setup
+    """One tool. commands: any one of these on PATH counts as present. winget/apt/brew: package ids; pip: a Python package (the
+    name is imported, never run); manual: the manual hint, used where no package is listed or the OS is in manual_os (a system setup
     that this check never installs by itself)."""
 
     def __init__(self, name, commands, importance, winget=None, apt=None, brew=None, pip=None, manual=None, using="", all_=False, manual_os=()):
-        self.name, self.commands, self.importance, self.all, self.manual_os = name, commands, importance, all_, manual_os   # hepsi: every command must be present
+        self.name, self.commands, self.importance, self.all, self.manual_os = name, commands, importance, all_, manual_os   # all_: every command must be present
         self.winget, self.apt, self.brew, self.pip, self.manual, self.using = winget, apt, brew, pip, manual, using
 
 
@@ -61,16 +61,16 @@ TOOLS = [
          using="sh script reviews, actionlint run: steps"),
     Tool("actionlint", ["actionlint"], RECOMMENDED, winget="rhysd.actionlint", apt="actionlint", brew="actionlint",
          using=".github/workflows/*.yml reviews"),
-    Tool("openssl", ["openssl"], OPTIONAL_LINKED, winget="ShiningLight.OpenSSL.Light", apt="openssl", brew="openssl",
+    Tool("openssl", ["openssl"], OPTIONAL, winget="ShiningLight.OpenSSL.Light", apt="openssl", brew="openssl",
          using="certificate / key checks (Git for Windows ships one)"),
-    Tool("dig/nslookup", ["dig", "nslookup"], OPTIONAL_LINKED, apt="dnsutils", brew="bind",
+    Tool("dig/nslookup", ["dig", "nslookup"], OPTIONAL, apt="dnsutils", brew="bind",
          manual="Windows ships nslookup; dig is optional (winget ISC.Bind, a large package, is not installed automatically)",
          using="DNS usage evidence (live dig / nslookup)"),
-    Tool("rsync", ["rsync"], OPTIONAL_LINKED, apt="rsync", brew="rsync",
+    Tool("rsync", ["rsync"], OPTIONAL, apt="rsync", brew="rsync",
          manual="no winget package; on Windows use scp or robocopy", using="server file sync from Linux hosts"),
-    Tool("docker", ["docker"], OPTIONAL_LINKED, winget="Docker.DockerDesktop", apt="docker.io", brew="docker",
+    Tool("docker", ["docker"], OPTIONAL, winget="Docker.DockerDesktop", apt="docker.io", brew="docker",
          manual="Docker Desktop / the daemon is a system setup, never installed by this check", manual_os=("windows", "linux", "macos"), using="lab services and containers"),
-    Tool("govc", ["govc"], OPTIONAL_LINKED,
+    Tool("govc", ["govc"], OPTIONAL,
          manual="no package: download the release of github.com/vmware/govmomi (govc) and put it on PATH", using="vSphere / vCenter lab VM work"),
 ]
 
@@ -115,7 +115,7 @@ WINDOWS_DIRS = {"tesseract": [r"%ProgramFiles%\Tesseract-OCR", r"%LOCALAPPDATA%\
 
 
 def add_user_path(dir_, to_start=False):
-    """Windows: put dizin into the user PATH (registry, REG_EXPAND_SZ; no setx, it cuts at 1024 characters) and into this process.
+    """Windows: put dir_ into the user PATH (registry, REG_EXPAND_SZ; no setx, it cuts at 1024 characters) and into this process.
     Returns True when the user PATH changed."""
     if not WINDOWS:
         return False
@@ -192,7 +192,7 @@ def python_module_present(python, module):
         return False
 
 
-def var_mi(t, python):
+def is_present(t, python):
     if t.pip:
         return python_module_present(python, t.pip)
     if t.name == "python3":
@@ -229,20 +229,20 @@ def tesseract_languages():
 
 # ---------------------------------------------------------------- install
 
-def package_manager(os_ad):
-    if os_ad == "windows":
+def package_manager(os_id):
+    if os_id == "windows":
         return "winget" if shutil.which("winget") else None
-    if os_ad == "macos":
+    if os_id == "macos":
         return "brew" if shutil.which("brew") else None
     return "apt" if shutil.which("apt-get") else None
 
 
-def install_commands(t, os_ad, python, pm=None):
+def install_commands(t, os_id, python, pm=None):
     """The command lines that install tool t on this OS (a list of argv lists), or [] when only a manual step exists."""
-    pm = pm if pm is not None else package_manager(os_ad)
-    if os_ad in t.manual_os:
+    pm = pm if pm is not None else package_manager(os_id)
+    if os_id in t.manual_os:
         return []
-    if t.pip and not (os_ad == "linux" and pm == "apt" and t.apt):
+    if t.pip and not (os_id == "linux" and pm == "apt" and t.apt):
         return [[python, "-m", "pip", "install", "--user", t.pip]]
     if pm == "winget" and t.winget:
         return [["winget", "install", "--id", t.winget, "-e", "--silent",
@@ -259,10 +259,10 @@ def line_text(argv):
     return " ".join(('"%s"' % a if " " in a else a) for a in argv)
 
 
-def manual_hint(t, os_ad):
+def manual_hint(t, os_id):
     if t.manual:
         return t.manual
-    if os_ad == "windows" and not t.winget:
+    if os_id == "windows" and not t.winget:
         return "no winget package on Windows"
     return "install it by hand (see docs/tool-requirements.md)"
 
@@ -274,18 +274,18 @@ def run_cmd(argv, time_overrun=1800):
         output = (r.stdout + "\n" + r.stderr).strip().splitlines()
         return r.returncode, output[-4:]
     except FileNotFoundError:
-        return 127, ["komut bulunamadi: %s" % argv[0]]
+        return 127, ["command not found: %s" % argv[0]]
     except (OSError, subprocess.SubprocessError) as e:
         return 1, [str(e)]
 
 
-def download_turn_data(language, target_dir):
-    """Download <dil>.traineddata (tessdata_fast) into target_dir. Returns an error text or None."""
+def download_language_data(language, target_dir):
+    """Download <language>.traineddata (tessdata_fast) into target_dir. Returns an error text or None."""
     try:
         with urllib.request.urlopen(TESSDATA_URL % language, timeout=120) as r:
             data = r.read()
         if len(data) < 100_000:
-            return "indirilen dosya cok kucuk (%d bayt)" % len(data)
+            return "downloaded file too small (%d bytes)" % len(data)
         target_dir.mkdir(parents=True, exist_ok=True)
         (target_dir / ("%s.traineddata" % language)).write_bytes(data)
         return None
@@ -293,25 +293,25 @@ def download_turn_data(language, target_dir):
         return str(e)
 
 
-def tesseract_turkish(os_ad, whatif, write=print):
+def tesseract_turkish(os_id, whatif, write=print):
     """tesseract with Turkish data. apt installs tesseract-ocr-tur; elsewhere tur.traineddata goes into the tessdata dir, or (when
     that is not writable, e.g. Program Files) into ~/.local/share/tessdata with eng/osd copied and TESSDATA_PREFIX set for the user.
     Returns True when Turkish is available (or would be)."""
     dir_, languages = tesseract_languages()
     if dir_ is None:
         return False
-    if "turn" in languages:
+    if "tur" in languages:
         return True
     if whatif:
-        write("  [-WhatIf] tesseract: tur dil verisi eklenecek")
+        write("  [-WhatIf] tesseract: Turkish language data would be added")
         return True
-    if os_ad == "linux" and package_manager(os_ad) == "apt":
-        rc, last = run_cmd(install_commands(Tool("t", [], RECOMMENDED, apt="tesseract-ocr-tur"), os_ad, sys.executable)[0])
-        write("  tesseract-ocr-tur: %s" % ("kuruldu" if rc == 0 else "HATA " + " | ".join(last)))
+    if os_id == "linux" and package_manager(os_id) == "apt":
+        rc, last = run_cmd(install_commands(Tool("t", [], RECOMMENDED, apt="tesseract-ocr-tur"), os_id, sys.executable)[0])
+        write("  tesseract-ocr-tur: %s" % ("installed" if rc == 0 else "ERROR " + " | ".join(last)))
         return rc == 0
-    error = download_turn_data("turn", Path(dir_))
+    error = download_language_data("tur", Path(dir_))
     if error is None:
-        write("  tesseract: tur.traineddata yazildi: %s" % dir_)
+        write("  tesseract: tur.traineddata written: %s" % dir_)
         return True
     # not writable: a per-user tessdata copy and TESSDATA_PREFIX
     user = Path.home() / ".local" / "share" / "tessdata"
@@ -320,16 +320,16 @@ def tesseract_turkish(os_ad, whatif, write=print):
         if source.is_file() and not (user / source.name).exists():
             user.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, user / source.name)
-    hata2 = download_turn_data("turn", user)
-    if hata2 is not None:
-        write("  tesseract: tur dil verisi yazilamadi (%s; %s)" % (error, hata2))
+    error2 = download_language_data("tur", user)
+    if error2 is not None:
+        write("  tesseract: Turkish language data could not be written (%s; %s)" % (error, error2))
         return False
     os.environ["TESSDATA_PREFIX"] = str(user)
     if WINDOWS:
         rc, _ = run_cmd(["setx", "TESSDATA_PREFIX", str(user)], 60)
-        write("  tesseract: tur verisi %s, TESSDATA_PREFIX kullanici ortamina %s" % (user, "written" if rc == 0 else "YAZILAMADI"))
+        write("  tesseract: Turkish data %s, TESSDATA_PREFIX %s in the user environment" % (user, "set" if rc == 0 else "NOT SET"))
     else:
-        write("  tesseract: tur verisi %s; kabugunuzda `export TESSDATA_PREFIX=%s` ekleyin" % (user, user))
+        write("  tesseract: Turkish data %s; add `export TESSDATA_PREFIX=%s` to your shell profile" % (user, user))
     return True
 
 
@@ -358,35 +358,35 @@ def python3_shim(python, remove=False, whatif=False, target_dir=None, write=prin
     if remove:
         for f in files:
             if f.is_file() and MARKER in _read(f):
-                write("%spython3-shim: sil: %s" % (tag, f))
+                write("%spython3-shim: delete: %s" % (tag, f))
                 if not whatif:
                     f.unlink()
         return True
     real = real_python3()
     if real and not any(f.is_file() and MARKER in _read(f) for f in files):
-        write("%spython3-shim: gerekmiyor, gercek python3 var: %s" % (tag, real))
+        write("%spython3-shim: not needed, a real python3 exists: %s" % (tag, real))
         return True
     if not python or not Path(python).is_file():
-        write("python3-shim: UYARI: yorumlayici bulunamadi (%s); shim yazilmadi" % python)
+        write("python3-shim: WARNING: interpreter not found (%s); shim not written" % python)
         return False
     content = {files[0]: shim_sh(python), files[1]: shim_cmd(python)}
     ok = True
     for f, text in content.items():
         if f.exists() and MARKER not in _read(f):
-            write("python3-shim: UYARI: %s baska bir dosya, dokunulmadi" % f)
+            write("python3-shim: WARNING: %s is another file, left untouched" % f)
             ok = False
             continue
         if f.is_file() and f.read_bytes() == text.encode("utf-8"):
-            write("%spython3-shim: ayni: %s" % (tag, f))
+            write("%spython3-shim: same: %s" % (tag, f))
             continue
-        write("%spython3-shim: yaz: %s" % (tag, f))
+        write("%spython3-shim: write: %s" % (tag, f))
         if not whatif:
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_bytes(text.encode("utf-8"))   # bytes: the sh shim keeps LF, the cmd shim CRLF
     return ok
 
 
-def python3_shim_yolda_mi():
+def python3_shim_on_path():
     """After writing: does `python3` resolve to our shim in this process's PATH? Returns (bool, resolved path or None)."""
     p = shutil.which("python3")
     return bool(p and MARKER in _read(Path(p))), p
@@ -394,51 +394,51 @@ def python3_shim_yolda_mi():
 
 # ---------------------------------------------------------------- report / run
 
-def check(python, os_ad=None):
-    """[(Arac, present bool)] in table order."""
+def check(python, os_id=None):
+    """[(Tool, present bool)] in table order."""
     refresh_path()
-    return [(t, var_mi(t, python)) for t in TOOLS]
+    return [(t, is_present(t, python)) for t in TOOLS]
 
 
-def report(result, os_ad, write=print, tur_ok=None):
-    pm = package_manager(os_ad)
-    write("Arac kontrolu (%s, paket yoneticisi: %s):" % (os_ad, pm or "MISSING"))
+def report(result, os_id, write=print, turkish_ok=None):
+    pm = package_manager(os_id)
+    write("Tool check (%s, package manager: %s):" % (os_id, pm or "MISSING"))
     for t, present in result:
         if present:
-            write("  tamam  %-30s %s" % (t.name, t.importance))
+            write("  ok       %-30s %s" % (t.name, t.importance))
             continue
-        command = install_commands(t, os_ad, sys.executable, pm)
-        hint = line_text(command[0]) if command else manual_hint(t, os_ad)
-        write("  EKSIK  %-30s %-12s -> %s" % (t.name, t.importance, hint))
-    if tur_ok is False:
-        write("  EKSIK  %-30s %-12s -> tur.traineddata (`install ... --tools` adds it)" % ("tesseract tur dil verisi", RECOMMENDED))
+        command = install_commands(t, os_id, sys.executable, pm)
+        hint = line_text(command[0]) if command else manual_hint(t, os_id)
+        write("  MISSING  %-30s %-12s -> %s" % (t.name, t.importance, hint))
+    if turkish_ok is False:
+        write("  MISSING  %-30s %-12s -> tur.traineddata (`install ... --tools` adds it)" % ("tesseract Turkish data", RECOMMENDED))
 
 
 def execute(python, install=False, whatif=False, write=print):
     """The check step. Report always; with install=True install what is missing. Returns 0 (all well / only optional gaps), 1 (an
     install failed or a required tool is still missing after install=True)."""
-    os_ad = os_name()
-    result = check(python, os_ad)
-    tur_ok = None
+    os_id = os_name()
+    result = check(python, os_id)
+    turkish_ok = None
     tess = next((v for t, v in result if t.name.startswith("tesseract")), False)
     if tess:
-        tur_ok = "turn" in tesseract_languages()[1]
-    report(result, os_ad, write, tur_ok)
+        turkish_ok = "tur" in tesseract_languages()[1]
+    report(result, os_id, write, turkish_ok)
     missing = [t for t, present in result if not present]
     if not install:
-        if missing or tur_ok is False:
-            write("Eksikleri kurmak icin: install.ps1 -Tools (Windows) / install.sh --tools (Linux, macOS).")
+        if missing or turkish_ok is False:
+            write("To install what is missing: install.ps1 -Tools (Windows) / install.sh --tools (Linux, macOS).")
         return 0
-    pm = package_manager(os_ad)
+    pm = package_manager(os_id)
     error = False
     update_done = False
     if WINDOWS and not whatif and str(bin_dir()) not in os.environ.get("PATH", "").split(os.pathsep):
         add_user_path(bin_dir(), to_start=True)   # the shims (python3, gh) live there; consent flag only
-        write("  %s kullanici PATH'inin basina eklendi" % bin_dir())
+        write("  %s added to the start of the user PATH" % bin_dir())
     for t in missing:
-        commands = install_commands(t, os_ad, python, pm)
+        commands = install_commands(t, os_id, python, pm)
         if not commands:
-            write("  atlandi: %s (%s)" % (t.name, manual_hint(t, os_ad)))
+            write("  skipped: %s (%s)" % (t.name, manual_hint(t, os_id)))
             error = error or t.importance == REQUIRED
             continue
         if t.name == "python3" and WINDOWS:
@@ -452,7 +452,7 @@ def execute(python, install=False, whatif=False, write=print):
                 update_done = True
             rc, last = run_cmd(argv)
             if rc != 0:
-                write("  HATA (%s, kod %s): %s" % (t.name, rc, " | ".join(last)))
+                write("  ERROR (%s, code %s): %s" % (t.name, rc, " | ".join(last)))
                 if WINDOWS and rc in PERMISSION_CODES:
                     write("  -> %s installer needs administrator rights (UAC was refused or could not be shown): run `install.ps1 -Tools` "
                         "(or this command) once from an elevated PowerShell." % t.name)
@@ -468,18 +468,18 @@ def execute(python, install=False, whatif=False, write=print):
                     d = os.path.expandvars(d)
                     if (Path(d) / (name + ".exe")).is_file():
                         add_user_path(d)
-                        write("  %s kullanici PATH'ine eklendi: %s" % (name, d))
+                        write("  %s added to the user PATH: %s" % (name, d))
                         break
     if tess or any(t.name.startswith("tesseract") for t in missing):
-        if not tesseract_turkish(os_ad, whatif, write):
-            write("  UYARI: tesseract Turkce dil verisi eklenemedi")
-    write("Kurulum sonrasi kontrol:")
-    sonuc2 = check(python, os_ad)
-    tess2 = next((v for t, v in sonuc2 if t.name.startswith("tesseract")), False)
-    report(sonuc2, os_ad, write, ("turn" in tesseract_languages()[1]) if tess2 else None)
-    remaining = [t for t, present in sonuc2 if not present and t.importance == REQUIRED]
-    if missing and any(not present for _, present in sonuc2):
-        write("Not: yeni kurulan araclar yeni acilan terminal/oturumlarda PATH'te gorunur.")
+        if not tesseract_turkish(os_id, whatif, write):
+            write("  WARNING: tesseract Turkish language data could not be added")
+    write("Check after the install:")
+    result2 = check(python, os_id)
+    tess2 = next((v for t, v in result2 if t.name.startswith("tesseract")), False)
+    report(result2, os_id, write, ("tur" in tesseract_languages()[1]) if tess2 else None)
+    remaining = [t for t, present in result2 if not present and t.importance == REQUIRED]
+    if missing and any(not present for _, present in result2):
+        write("Note: newly installed tools are on PATH in terminals and sessions opened from now on.")
     return 1 if (error or remaining) else 0
 
 
