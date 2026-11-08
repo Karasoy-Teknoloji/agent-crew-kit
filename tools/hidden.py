@@ -3,7 +3,7 @@
 Why: a console child (git, gh, powershell, claude) of a process that has no console (pythonw, a scheduled task, a hook) gets a NEW console,
 and with Windows Terminal as the default terminal that is a visible window that flashes up and closes again. CREATE_NO_WINDOW stops that.
 Use hidden.run / hidden.popen instead of subprocess.run / subprocess.Popen. Children that must talk to the user's terminal
-(an interactive pass-through such as the gh shim, a terminal window opened on purpose) use gorunur=True, with a comment; tools/tests/test_hidden_guard.py
+(an interactive pass-through such as the gh shim, a terminal window opened on purpose) use visible=True, with a comment; tools/tests/test_hidden_guard.py
 fails on any direct subprocess call.
 On Linux/macOS everything here is a plain subprocess call.
 """
@@ -25,11 +25,11 @@ def _kw(kw, visible=False):
 
 
 def run(*args, visible=False, **kw):
-    """subprocess.run without a console window. gorunur=True leaves the flag out on purpose (the child owns the terminal or its window
+    """subprocess.run without a console window. visible=True leaves the flag out on purpose (the child owns the terminal or its window
     must be seen: an interactive pass-through, a tab opened for a person): say why in a comment at that call."""
     return subprocess.run(*args, **_kw(kw, visible))
 
 
 def popen(*args, visible=False, **kw):
-    """subprocess.Popen without a console window (gorunur=True: leave the flag out on purpose, see run)."""
+    """subprocess.Popen without a console window (visible=True: leave the flag out on purpose, see run)."""
     return subprocess.Popen(*args, **_kw(kw, visible))

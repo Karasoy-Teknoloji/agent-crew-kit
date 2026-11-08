@@ -2,7 +2,7 @@
 
 Why: under pythonw (every scheduled task, many hooks) there is no console, so a child started without CREATE_NO_WINDOW
 opens a visible console window; a scan with hundreds of git calls opened hundreds of windows. tools/hidden.py
-adds the flag in ONE place (a child that must stay visible or own the terminal says so with hidden.run(..., gorunur=True)); this test fails when a new call site bypasses it, and lists file:line.
+adds the flag in ONE place (a child that must stay visible or own the terminal says so with hidden.run(..., visible=True)); this test fails when a new call site bypasses it, and lists file:line.
 
 Run: python -m unittest discover -s tools/tests
 """

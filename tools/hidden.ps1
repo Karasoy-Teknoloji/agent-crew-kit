@@ -12,7 +12,7 @@
  Without conhost.exe (pre-1809 Windows) the fallback is pythonw.exe for python.exe, the plain executable otherwise.
 #>
 
-function Get-GizliKomut {
+function Get-HiddenCommand {
     # The single place that decides how a hidden launch looks: returns Exe/Argument to hand to a task action or Start-Process.
     param([Parameter(Mandatory)][string]$Exe, [string]$Argument = '')
     $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
@@ -26,14 +26,14 @@ function Get-GizliKomut {
     return @{ Exe = $Exe; Argument = $Argument }
 }
 
-function New-GizliEylem {
+function New-HiddenAction {
     # Task action that runs `-Exe -Argument` without any window.
     param([Parameter(Mandatory)][string]$Exe, [string]$Argument = '')
-    $k = Get-GizliKomut -Exe $Exe -Argument $Argument
-    return New-ScheduledTaskAction -Execute $k.Exe -Argument $k.Argument
+    $cmd = Get-HiddenCommand -Exe $Exe -Argument $Argument
+    return New-ScheduledTaskAction -Execute $cmd.Exe -Argument $cmd.Argument
 }
 
-function Register-GizliGorev {
+function Register-HiddenTask {
     # Registers (or replaces) a per-user, no-admin, hidden task. Every installer calls this instead of Register-ScheduledTask.
     param(
         [Parameter(Mandatory)][string]$Name,
@@ -43,16 +43,16 @@ function Register-GizliGorev {
         [Parameter(Mandatory)]$Settings,
         [string]$Description = ''
     )
-    $a = New-GizliEylem -Exe $Exe -Argument $Argument
+    $a = New-HiddenAction -Exe $Exe -Argument $Argument
     $p = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $Name -Action $a -Trigger $Trigger -Settings $Settings -Principal $p -Force -Description $Description | Out-Null
 }
 
-function Start-GizliSurec {
+function Start-HiddenProcess {
     # Starts `-Exe -Argument` detached without any window and returns at once (a background job started from a script/status line).
     # -PassThru returns the started process (the conhost host when headless) instead of nothing.
     param([Parameter(Mandatory)][string]$Exe, [string]$Argument = '', [switch]$PassThru)
-    $k = Get-GizliKomut -Exe $Exe -Argument $Argument
-    $p = Start-Process -FilePath $k.Exe -ArgumentList $k.Argument -WindowStyle Hidden -PassThru
+    $cmd = Get-HiddenCommand -Exe $Exe -Argument $Argument
+    $p = Start-Process -FilePath $cmd.Exe -ArgumentList $cmd.Argument -WindowStyle Hidden -PassThru
     if ($PassThru) { return $p }
 }

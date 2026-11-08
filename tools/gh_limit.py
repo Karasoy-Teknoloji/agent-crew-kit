@@ -460,7 +460,7 @@ def real_gh():
 
 def transition(gh, args):
     if WINDOWS:     # os.execv does not replace the process on Windows: the prompt would return before gh ends
-        sys.exit(hidden.run([gh] + args, visible=True).returncode)   # gorunur: interactive pass-through, the terminal's console is inherited (Ctrl+C, prompts)
+        sys.exit(hidden.run([gh] + args, visible=True).returncode)   # visible: interactive pass-through, the terminal's console is inherited (Ctrl+C, prompts)
     os.execv(gh, [gh] + args)
 
 
@@ -501,7 +501,7 @@ def run_cmd(args):
         wait = wait_pause() + wait_bucket(kind)
         slot, sw = (None, 0.0) if kind == "watch" else slot_al()
         try:
-            rc = hidden.run([gh] + args, env=env, visible=True).returncode   # gorunur: streams to the terminal
+            rc = hidden.run([gh] + args, env=env, visible=True).returncode   # visible: streams to the terminal
         finally:
             if slot:
                 slot.__exit__()
