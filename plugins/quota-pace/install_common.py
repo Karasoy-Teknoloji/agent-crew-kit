@@ -86,7 +86,7 @@ STATUS = "quota-pace.json"   # ~/.claude/<STATUS>: written by a direct-source (-
 CLONE = SRC.parent.parent
 sys.path.insert(0, str(CLONE / "tools"))   # tools/hidden.py: the one hidden-launch helper (python -I drops the script dir)
 from hidden_loader import hidden  # noqa: E402
-import settings  # noqa: E402  (tools/settings.py: the team layer, here its optional migration hook)
+import settings as team_layer  # noqa: E402  (tools/settings.py: the team layer, here its optional migration hook; `settings` names settings.json here)
 RULES_WATCH = CLONE / "tools" / "rules_watch.py"
 HIDDEN_PS1 = CLONE / "tools" / "hidden.ps1"   # the one hidden-launch helper every Windows task snippet dot-sources
 LOST = CLONE / "tools" / "lost_work.py"
@@ -1854,12 +1854,12 @@ def main():
     # --whatif previews the same result, writing nothing.
     if not (a.remove or a.probe or a.setting):
         # a downstream team's own migration (tools/team_migrate.py --ensure, absent in the kit) runs before the saved record is read,
-        # so it can bring old state, settings and names up to date first; it fails open (settings.team_migrate)
+        # so it can bring old state, settings and names up to date first; it fails open (team_migrate in tools/settings.py)
         if a.whatif:
-            if Path(settings.MIGRATE).is_file():
+            if Path(team_layer.MIGRATE).is_file():
                 say("whatif: would run the team migration (tools/team_migrate.py --ensure) first")
         else:
-            for line in settings.team_migrate():
+            for line in team_layer.team_migrate():
                 say(line)
         record = registered_setup(Path.home() / ".claude")
         if record:

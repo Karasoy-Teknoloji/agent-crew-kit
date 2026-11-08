@@ -120,7 +120,7 @@ class Wiring(unittest.TestCase):
     def test_installer_runs_the_hook_before_reading_the_saved_record(self):
         s = self.src("plugins", "quota-pace", "install_common.py")
         main = s[s.index("\ndef main("):]
-        self.assertLess(main.index("settings.team_migrate()"), main.index("registered_setup(Path.home()"))
+        self.assertLess(main.index("team_layer.team_migrate()"), main.index("registered_setup(Path.home()"))
 
     def test_rules_watch_runs_the_hook_before_reading_quota_pace_json(self):
         s = self.src("tools", "rules_watch.py")
