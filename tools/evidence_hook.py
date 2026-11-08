@@ -112,11 +112,11 @@ _CLAIM_SOURCES = [
     # Turkish (input data, kept on purpose): "<thing> yok" = "<thing> is missing"
     r"yetki(?:si|m|miz|niz|leri)?\s+(?:yok|yetersiz|eksik|bulunmuyor|bulunamadi|verilmemis|verilmedi)",
     r"erisim(?:i|im|imiz)?\s+(?:yok|reddedildi|engellendi|saglanamadi|bulunmuyor)",
-    r"(?:token|pat|anahtar|sifre|parola|kimlik\s+bilgisi|credential|api\s*key)\w*\s+(?:\S+\s+){0,2}?(?:yok|bulunamadi|bulunmuyor|eksik)\b",
-    r"(?:token|pat|anahtar|sifre|parola|kimlik\s+bilgisi|credential)\w*\s+(?:gerekiyor|gerekli|lazim|verilmedi)\b",
+    r"(?<!\w)(?:token|pat(?!\w)|anahtar|sifre|parola|kimlik\s+bilgisi|credential|api\s*key)\w*\s+(?:\S+\s+){0,2}?(?:yok|bulunamadi|bulunmuyor|eksik)\b",
+    r"(?<!\w)(?:token|pat(?!\w)|anahtar|sifre|parola|kimlik\s+bilgisi|credential)\w*\s+(?:gerekiyor|gerekli|lazim|verilmedi)\b",
     r"(?:izin|yetki|erisim)\s+(?:gerekiyor|gerekli|lazim|istiyor|verilmedi|verilmemis)\b",
-    r"(?:token|pat|parola|sifre|anahtar|credential|yetki|erisim)\w*\s+(?:verir|verebilir|saglar|paylasir|paylasabilir)\s+misin",
-    r"(?:token|pat|parola|sifre|anahtar|credential|yetki|erisim)\w*\s+(?:verin|verseniz|verirseniz|vermeniz|paylasin|paylasirsaniz)",
+    r"(?<!\w)(?:token|pat(?!\w)|parola|sifre|anahtar|credential|yetki|erisim)\w*\s+(?:verir|verebilir|saglar|paylasir|paylasabilir)\s+misin",
+    r"(?<!\w)(?:token|pat(?!\w)|parola|sifre|anahtar|credential|yetki|erisim)\w*\s+(?:verin|verseniz|verirseniz|vermeniz|paylasin|paylasirsaniz)",
     # Turkish: asking the user for access (b): "yetki ver" (grant access), "erişim aç" (open access), "giriş yap" (log in)
     r"\byetki\s+ver(?:in|ir\s+misin|ebilir\s+misin)?(?!\w)",
     r"\berisim\s+(?:ac|acin|ver|verin|acar\s+misin|acabilir\s+misin)(?!\w)",
@@ -138,7 +138,7 @@ _CLAIMS = re.compile("(?:" + "|".join(_CLAIM_SOURCES) + ")")
 # "No secret in the code/repo" is good news, not missing access (Turkish "kodda artik sifre yok" (no password in the code any more), "repoda token bulunmuyor" (no token in the repo)).
 _BENIGN_ABSENCE = re.compile(
     r"\b(?:kod|repo|kaynak|dosya|commit|diff|gecmis|branch|log)\w*\s+(?:\S+\s+){0,3}?"
-    r"(?:token|pat|anahtar|sifre|parola|kimlik\s+bilgisi|credential|api\s*key)\w*\s+(?:yok|bulunmuyor|kalmadi)\b")
+    r"(?<!\w)(?:token|pat(?!\w)|anahtar|sifre|parola|kimlik\s+bilgisi|credential|api\s*key)\w*\s+(?:yok|bulunmuyor|kalmadi)\b")
 _FIND_RUN = re.compile(r"\bvault_cli(?:\.py)?[\"']?\s+find\b")
 # Session memory: a `vault_cli.py find` run (Bash call) or citation (assistant text) anywhere earlier in the same transcript within
 # the last FIND_MEMORY_HOURS counts like a search in the current turn. Env EVIDENCE_HOOK_FIND_HOURS overrides (0 = turn only).
