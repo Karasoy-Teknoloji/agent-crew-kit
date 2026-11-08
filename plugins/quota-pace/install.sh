@@ -32,7 +32,7 @@
 #   bash install.sh            (default = direct source) the scripts run straight from this claude-shared clone, nothing is copied into
 #                          ~/.claude/bin: settings.json (statusLine, hooks), the cost command and the daily job point into the clone, so
 #                          updates arrive with git pull, which tools/rules_watch.py does at session start with a self-check and a rollback.
-#                          Copies left by an older install are backed up (.yedek-<date>) and removed. Every run keeps the
+#                          Copies left by an older install are backed up (.backup-<date>) and removed. Every run keeps the
 #                          --share/--person/--plan/--last-window options saved by the last install and adds the flags given (none is dropped; --remove undoes all).
 #   bash install.sh            (every mode) also installs the team's lost-work protection from this clone: the SessionStart hook
 #                          tools/rules_watch.py (rule warnings + own unpushed/uncommitted work report) and a daily systemd user timer
@@ -47,14 +47,14 @@
 #                          plugins/crew-agents (tools, output style) from this clone: settings.json declares the claude-shared
 #                          marketplace as a local directory source (plugins load in place, no copy), enables crew-agents@claude-shared
 #                          and `claude plugin install` registers it (idempotent, skipped when `claude` is not on PATH); old-name agent
-#                          files in ~/.claude/agents are backed up (.yedek-<date>) and removed.
+#                          files in ~/.claude/agents are backed up (.backup-<date>) and removed.
 #   bash install.sh --copy    legacy copy mode (scripts copied into ~/.claude/bin; every update needs a re-run). --repodan is accepted (= default).
 # The real work is in install_common.py (shared with install.ps1); this script only finds python3 and checks that jq (the status line needs it) exists.
 set -eu
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 extra=()
 quiet=0
-araclar=0
+tools=0
 need_val() { [ "$#" -ge 2 ] || { echo "HATA: $1 bir deger ister (ornek: --person \"Ad Soyad\", --plan 100)."; exit 2; }; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -68,7 +68,7 @@ while [ "$#" -gt 0 ]; do
     --slack-inbox) extra+=(--slack-inbox) ;;
     --slack-triage) extra+=(--slack-triage) ;;
     --stale) extra+=(--stale) ;;
-    --tools) extra+=(--tools); araclar=1 ;;
+    --tools) extra+=(--tools); tools=1 ;;
     --repodan) extra+=(--repodan) ;;
     --copy) extra+=(--copy) ;;
     --person|--plan) need_val "$@"; extra+=("$1" "$2"); shift ;;

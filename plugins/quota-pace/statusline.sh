@@ -7,10 +7,10 @@ case "${BASH_SOURCE[0]}" in */*) kt="${BASH_SOURCE[0]%/*}" ;; *) kt=. ;; esac
 # Live-session guard (same rule as statusline.ps1): only a payload from a live Claude Code session may write the live state. ~/.claude/sessions/<pid>.json
 # lists the live sessions; a payload whose session_id is not in it (test fixture, benchmark against the real profile) is rendered but writes nothing.
 # No registry, or none with a sessionId = cannot judge = write as before. Incident 05.11.2026: a fixture run made the pace hook say "TIGHT, 63%" at a real 54%.
-canli=1
+live=1
 if grep -qs '"sessionId"' ~/.claude/sessions/*.json 2>/dev/null; then
   sid=$(jq -r '.session_id // empty' <<<"$d" 2>/dev/null)
-  case "$sid" in ''|*[!A-Za-z0-9_-]*) canli=0 ;; *) grep -qsE "\"sessionId\" *: *\"$sid\"" ~/.claude/sessions/*.json 2>/dev/null || canli=0 ;; esac
+  case "$sid" in ''|*[!A-Za-z0-9_-]*) live=0 ;; *) grep -qsE "\"sessionId\" *: *\"$sid\"" ~/.claude/sessions/*.json 2>/dev/null || live=0 ;; esac
 fi
 # Debug aid (kept permanently): the last stdin JSON Claude Code sent, ~/.claude/statusline-input.json (0600, overwritten, atomic)
 [ "$live" = 1 ] && ( umask 077; printf '%s' "$d" > ~/.claude/statusline-input.json.tmp$$ && mv -f ~/.claude/statusline-input.json.tmp$$ ~/.claude/statusline-input.json ) 2>/dev/null
@@ -167,9 +167,9 @@ if [ -s "$sg" ]; then
   [ "${sgn:-0}" -gt 0 ] 2>/dev/null && out+=" | Slack: $sgn yeni"
 fi
 # Burn mode (last-window burn --on): " | BURN" while it is on and its weekly reset has not passed (same rule as statusline.ps1)
-bf="$HOME/.claude/last-window/bitir.json"
+bf="$HOME/.claude/last-window/burn.json"
 if [ -s "$bf" ]; then
-  bhr=$(jq -r 'if .aktif == true then (.week_reset // 0 | floor) else 0 end' "$bf" 2>/dev/null)
+  bhr=$(jq -r 'if .active == true then (.week_reset // 0 | floor) else 0 end' "$bf" 2>/dev/null)
   case "$bhr" in ''|*[!0-9]*) bhr=0 ;; esac
   [ "$bhr" -gt "$nowts" ] 2>/dev/null && out+=" | BURN"
 fi

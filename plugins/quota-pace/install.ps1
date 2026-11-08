@@ -33,7 +33,7 @@
 #   pwsh -File install.ps1            (default = direct source) the scripts run straight from this claude-shared clone, nothing is copied into
 #                                 %USERPROFILE%\.claude\bin: settings.json, cost.cmd and the daily task point into the clone, so updates
 #                                 arrive with git pull (tools/rules_watch.py does it at session start with a self-check and a rollback).
-#                                 Copies of an older install are backed up (.yedek-<date>) and removed. Every run keeps the -Share/-Person/
+#                                 Copies of an older install are backed up (.backup-<date>) and removed. Every run keeps the -Share/-Person/
 #                                 -Plan/-LastWindow options saved by the last install and adds the flags given (none is dropped; -Remove undoes all).
 #   pwsh -File install.ps1            (every mode) also installs the team's lost-work protection from this clone: the SessionStart hook
 #                                 tools/rules_watch.py (rule warnings + own unpushed/uncommitted work report) and a per-user daily task
@@ -51,7 +51,7 @@
 #                                 the link), and enables the plugin plugins/crew-agents (tools, output style) from this clone: settings.json
 #                                 declares the claude-shared marketplace as a local directory source (plugins load in place, no copy), enables
 #                                 crew-agents@claude-shared and `claude plugin install` registers it (idempotent, skipped when `claude` is
-#                                 not on PATH); old-name agent files in ~/.claude/agents are backed up (.yedek-<date>) and removed.
+#                                 not on PATH); old-name agent files in ~/.claude/agents are backed up (.backup-<date>) and removed.
 #   pwsh -File install.ps1 -Copy     legacy copy mode (every update needs a re-run). -Repodan is accepted (= default).
 # The real work is in install_common.py (shared with install.sh); this script only finds Python and pwsh.
 param(

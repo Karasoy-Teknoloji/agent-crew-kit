@@ -249,10 +249,10 @@ try {
 } catch {}
 # Burn mode (last-window burn --on): " | BURN" while it is on and its weekly reset has not passed. One small file read, no Python.
 try {
-    $bf = "$env:USERPROFILE/.claude/last-window/bitir.json"
+    $bf = "$env:USERPROFILE/.claude/last-window/burn.json"
     if ([IO.File]::Exists($bf)) {
         $bt = [IO.File]::ReadAllText($bf) | ConvertFrom-Json
-        if ($bt.active -eq $true -and [long]$bt.week_reset -gt $now) { $out += ' | B' + [char]0x0130 + 'T' + [char]0x0130 + 'R' }
+        if ($bt.active -eq $true -and [long]$bt.week_reset -gt $now) { $out += ' | BURN' }
     }
 } catch {}
 $branch = git -C $dir branch --show-current 2>$null

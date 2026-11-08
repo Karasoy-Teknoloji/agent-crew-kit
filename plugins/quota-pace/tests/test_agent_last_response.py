@@ -1,4 +1,4 @@
-"""Tests for the sub-agent row's last-activity part ("<age> sessiz" from 10 min, "boşta").
+"""Tests for the sub-agent row's last-activity part ("<age> quiet" from 10 min, "idle").
 Stdlib only, synthetic transcripts only, nothing reads or writes the real ~/.claude.
 
 Run:  python3 -I -m unittest discover -s plugins/quota-pace/tests     (from the repo root)
@@ -48,12 +48,12 @@ NOISE = json.dumps({"type": "api-request", "timestamp": iso(T0 + 999), "params":
 class Fmt(unittest.TestCase):
     def test_humanize(self):
         h = S.humanize_secs
-        self.assertEqual(h(12), "12sn")
-        self.assertEqual(h(59), "59sn")
-        self.assertEqual(h(60), "1dk")
-        self.assertEqual(h(4 * 60 + 40), "4dk 40sn")
-        self.assertEqual(h(5 * 3600 + 32 * 60), "5sa 32dk")
-        self.assertEqual(h(2 * 86400 + 3 * 3600), "2g 3sa")
+        self.assertEqual(h(12), "12s")
+        self.assertEqual(h(59), "59s")
+        self.assertEqual(h(60), "1m")
+        self.assertEqual(h(4 * 60 + 40), "4m 40s")
+        self.assertEqual(h(5 * 3600 + 32 * 60), "5h 32m")
+        self.assertEqual(h(2 * 86400 + 3 * 3600), "2d 3h")
 
 
 class QueueParse(unittest.TestCase):
@@ -117,7 +117,7 @@ class LinePart(unittest.TestCase):
 
     def test_hours_and_idle(self):
         self.write([assistant(T0 - (5 * 3600 + 32 * 60))])
-        self.assertEqual(self.parts(), ["5sa 32dk sessiz", "boşta"])
+        self.assertEqual(self.parts(), ["5h 32m quiet", "idle"])
 
     def test_minutes(self):
         self.write([assistant(T0 - 300, tool=True)])
@@ -125,19 +125,19 @@ class LinePart(unittest.TestCase):
         self.write([assistant(T0 - 599, tool=True)], aid="aB")
         self.assertEqual(self.parts({"id": "aB"}), [])
         self.write([assistant(T0 - 720, tool=True)], aid="aC")
-        self.assertEqual(self.parts({"id": "aC"}), ["12dk sessiz"])
+        self.assertEqual(self.parts({"id": "aC"}), ["12m quiet"])
         self.assertEqual(S.SILENT_AFTER, 600)
 
     def test_days_show_date(self):
         ep = T0 - (2 * 86400 + 3 * 3600)
         self.write([assistant(ep, tool=True)])
-        self.assertEqual(self.parts(), ["2g 3sa sessiz"])
+        self.assertEqual(self.parts(), ["2d 3h quiet"])
 
     def test_idle_needs_running_status_and_grace(self):
         self.write([assistant(T0 - 10)])
         self.assertEqual(self.parts(), [])                                   # younger than the grace: normal hand-over
         self.write([assistant(T0 - 600)])
-        self.assertNotIn("boşta", self.parts({"id": "aX", "status": "completed"}))
+        self.assertNotIn("idle", self.parts({"id": "aX", "status": "completed"}))
 
     def test_missing_file_gives_nothing(self):
         self.assertEqual(S.activity_parts({"id": "nope"}, self.session, T0, self.tools, self.cache), [])
@@ -171,8 +171,8 @@ class LinePart(unittest.TestCase):
         self.assertTrue(S.last_activity(p, self.cache)[1])
 
     def test_row_body_appends_activity_last(self):
-        row = S.row_body({"id": "a", "description": "d", "agentType": "t", "tokenCount": 5000}, T0, (), ["12dk sessiz", "boşta"])
-        self.assertTrue(row.endswith("· 12dk sessiz · boşta"))
+        row = S.row_body({"id": "a", "description": "d", "agentType": "t", "tokenCount": 5000}, T0, (), ["12m quiet", "idle"])
+        self.assertTrue(row.endswith("· 12m quiet · idle"))
 
 
 if __name__ == "__main__":

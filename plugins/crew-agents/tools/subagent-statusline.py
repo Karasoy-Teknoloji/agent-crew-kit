@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Claude Code subagentStatusLine: show each subagent's task first.
 
-Row body: <description> · <agentType, dim> · <tokens, e.g. 179k> [· ₺205 (₺15)] [· <elapsed>] [· 12dk sessiz] [· boşta]
+Row body: <description> · <agentType, dim> · <tokens, e.g. 179k> [· ₺205 (₺15)] [· <elapsed>] [· 12m quiet] [· idle]
 
 Last activity (no model calls; reads only the last 256 KB of the agent's transcript, cached per file mtime+size):
-  sessiz     "<age> sessiz" (e.g. "12dk sessiz"): age of the last assistant message or tool result in the transcript (the file
+  quiet      "<age> quiet" (e.g. "12m quiet"): age of the last assistant message or tool result in the transcript (the file
              mtime when none can be read). Shown only from SILENT_AFTER (10 min) on; hidden below it.
-  boşta      the task is still "running" but the last turn ended: the last assistant message has stop_reason "end_turn" and no
+  idle       the task is still "running" but the last turn ended: the last assistant message has stop_reason "end_turn" and no
              tool_use, nothing follows it, and it is at least 30 s old. This is the agent that finished while something it started
              (a test process) keeps the row registered. Omitted when the transcript does not show that.
   Both parts need the quota-pace tools (transcript lookup cost_incremental.agent_file); without them the row is unchanged.
@@ -68,10 +68,10 @@ def fmt_elapsed(start_ms, now):
 
 
 def humanize_secs(secs):
-    """Two-stage human duration (largest two units), Turkish abbreviations:
-    45sn, 4dk 40sn, 18sa 42dk, 2g 3sa. A zero lower unit is dropped (3sa, not 3sa 0dk)."""
+    """Two-stage human duration (largest two units), abbreviations:
+    45s, 4m 40s, 18h 42m, 2d 3h. A zero lower unit is dropped (3h, not 3h 0m)."""
     secs = max(0, int(secs))
-    units = (("g", 86400), ("sa", 3600), ("min", 60), ("sec", 1))
+    units = (("d", 86400), ("h", 3600), ("m", 60), ("s", 1))
     for i, (name, size) in enumerate(units):
         if secs >= size or i == len(units) - 1:
             top = f"{secs // size}{name}"
@@ -80,7 +80,7 @@ def humanize_secs(secs):
             low_name, low_size = units[i + 1]
             low = (secs % size) // low_size
             return f"{top} {low}{low_name}" if low else top
-    return "0sn"
+    return "0s"
 
 
 def load_cost_tools():
@@ -117,8 +117,8 @@ def cost_parts(task, transcript_path, tools, factor):
 
 
 TAIL_BYTES = 256 * 1024
-SILENT_AFTER = 600  # s: the "<age> sessiz" part is shown only when the agent made no progress for this long
-IDLE_GRACE = 30     # s: a final answer younger than this is still the normal hand-over, not "boşta"
+SILENT_AFTER = 600  # s: the "<age> quiet" part is shown only when the agent made no progress for this long
+IDLE_GRACE = 30     # s: a final answer younger than this is still the normal hand-over, not "idle"
 _CACHE_MAX = 200
 
 
@@ -218,7 +218,7 @@ def last_activity(path, cache_file=None):
 
 
 def activity_parts(task, transcript_path, now, tools, cache_file=None):
-    """['12dk sessiz'] (+ ['boşta']) for one task; [] when its transcript cannot be read."""
+    """['12m quiet'] (+ ["idle"]) for one task; [] when its transcript cannot be read."""
     if not tools:
         return []
     try:
@@ -229,9 +229,9 @@ def activity_parts(task, transcript_path, now, tools, cache_file=None):
         if ts is None:
             return []
         age = max(0, int(now - ts))
-        parts = ["%s sessiz" % humanize_secs(age)] if age >= SILENT_AFTER else []
+        parts = ["%s quiet" % humanize_secs(age)] if age >= SILENT_AFTER else []
         if ended and age >= IDLE_GRACE and task.get("status", "running") == "running":
-            parts.append("boşta")
+            parts.append("idle")
         return parts
     except Exception:
         return []

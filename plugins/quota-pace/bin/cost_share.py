@@ -104,7 +104,7 @@ def setting_value(name, env, default=""):
 
 
 REPORT_DIR = setting_value("report-dir", "CLAUDE_SHARED_REPORT_DIR", "raporlar/kullanim").strip("/")
-PEOPLE_PATH = setting_value("people-path", "CLAUDE_SHARED_PEOPLE", "plugins/quota-pace/kisiler.json").strip("/")
+PEOPLE_PATH = setting_value("people-path", "CLAUDE_SHARED_PEOPLE", "plugins/quota-pace/people.json").strip("/")
 REMOTE_MISSING = "ortak depo ayarlanmadi (CLAUDE_SHARED_REMOTE veya ~/.config/claude-shared/uzak; README, Configuration)"
 
 

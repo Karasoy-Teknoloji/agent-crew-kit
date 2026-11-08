@@ -181,9 +181,9 @@ def places(claude, repodan, want):
 
 def backup_name(path):
     """path.backup-<date>; if that exists already (rerun the same day), keep the older backup."""
-    bak = path.with_name(path.name + f".yedek-{STAMP}")
+    bak = path.with_name(path.name + f".backup-{STAMP}")
     if bak.exists():
-        bak = path.with_name(path.name + f".yedek-{STAMP}-{datetime.datetime.now():%H%M%S}")
+        bak = path.with_name(path.name + f".backup-{STAMP}-{datetime.datetime.now():%H%M%S}")
     return bak
 
 
@@ -327,7 +327,7 @@ EXIT_SETTING_INVALID = 3
 def apply_rules_watch(settings, python):
     """--setting (run by tools/rules_watch.py's background run after a pull): bring ONLY the rules_watch hook entries of settings.json up to
     date with merge_rules_watch, the same function the install uses, so a new RW_EVENTS event arrives with git pull and needs no re-run.
-    Touches nothing else; no write when nothing changes; one backup (.yedek-<date>) before the first write; the write is atomic (temp file
+    Touches nothing else; no write when nothing changes; one backup (.backup-<date>) before the first write; the write is atomic (temp file
     + replace). A missing file is left alone (no install yet); invalid JSON is not touched (EXIT_SETTING_INVALID). Returns the exit code."""
     if not settings.is_file():
         say("settings.json yok: dokunulmadi")
@@ -540,7 +540,7 @@ def claude_plugins(cfg, a, tag):
 
 def clean_old_agents(claude, tag, whatif):
     """Back up and remove ~/.claude/agents/<old name>.md (a copy or a symlink of either old agent set, dangling ones included), so
-    only the merged team set loads. A symlink is only removed (its target lives in git); a file is copied to .yedek-<date>
+    only the merged team set loads. A symlink is only removed (its target lives in git); a file is copied to .backup-<date>
     first (the backup does not end in .md, so Claude Code does not load it)."""
     folder = claude / "agents"
     for name in OLD_AGENTS:
@@ -640,7 +640,7 @@ def agent_link(claude, tag, remove, target_=None):
 
 def update_agent_names(claude, tag, whatif):
     """Rewrite whole-word old agent names (OLD_AGENTS) in the personal ~/.claude/CLAUDE.md to the new names, so sessions stop asking
-    for agents that no longer exist. Only that file (never repos, rules files or memory). The file is backed up (.yedek-<date>) first;
+    for agents that no longer exist. Only that file (never repos, rules files or memory). The file is backed up (.backup-<date>) first;
     nothing is written with whatif; a second run finds nothing. A line that talks about the old names themselves ("old names ...",
     "eski ad ...") is history text and is left alone. `quick-task-hm` is not matched by `quick-task` (no word or hyphen neighbours)."""
     p = claude / "CLAUDE.md"
@@ -854,7 +854,7 @@ def unit_q(p):
 
 def clean_old_dropin(dropin_dir, claude, home, tag):
     """An old manual drop-in (`cost-daily.service.d/paylas.conf` or any other *.conf there) whose ExecStart runs a script under
-    ~/.claude/bin/ breaks once the direct-source install removes that copy. Back it up (.yedek-<date>), remove it, and say so in one
+    ~/.claude/bin/ breaks once the direct-source install removes that copy. Back it up (.backup-<date>), remove it, and say so in one
     line. Drop-ins that run anything else are left alone. Returns True when one was found (the caller does the daemon-reload)."""
     kok = os.path.normpath(str(claude / "bin"))
     found = False
@@ -879,7 +879,7 @@ def clean_old_dropin(dropin_dir, claude, home, tag):
 
 def clean_old_scheduler_dropin(dropin_dir, tag):
     """An old manual timer drop-in (`cost-daily.timer.d/*.conf`) that only re-sets OnCalendar= keeps the old daily time alive
-    over the 2-hourly schedule of the shipped timer (a drop-in wins). Back it up (.yedek-<date>), remove it, say so in one line.
+    over the 2-hourly schedule of the shipped timer (a drop-in wins). Back it up (.backup-<date>), remove it, say so in one line.
     A drop-in with anything else in it is left alone. Returns True when one was removed (the caller does the daemon-reload)."""
     found = False
     for conf in sorted(dropin_dir.glob("*.conf")) if dropin_dir.is_dir() else []:
@@ -1103,7 +1103,7 @@ def cost_extra(a, python, claude, tag, script):
     ok = True
     if a.windows:
         wrapper = claude / "bin" / "cost.cmd"   # in ~/.claude/bin in both modes: statusline.ps1 reads the python path from it
-        target = f'"{posix(script)}"' if a.repodan else '"%~dp0maliyet.py"'
+        target = f'"{posix(script)}"' if a.repodan else '"%~dp0cost.py"'
         body = f'@"{python}" {target} %*\r\n'
     else:
         wrapper = home / ".local" / "bin" / "cost"
@@ -1278,7 +1278,7 @@ def last_window_extra(a, python, claude, tag, script):
     ok = True
     wrapper = sp_wrapper(a, claude)
     if a.windows:
-        target = f'"{posix(script)}"' if a.repodan else '"%~dp0son_window.py"'
+        target = f'"{posix(script)}"' if a.repodan else '"%~dp0last_window.py"'
         body = f'@"{python}" -I {target} %*\r\n'
     else:
         body = f'#!/bin/sh\n# Claude Code "son pencere" (last quota window). Help: last-window --help\nexec "{python}" -I "{posix(script)}" "$@"\n'
