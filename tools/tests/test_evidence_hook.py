@@ -14,7 +14,7 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "evidence_hook.py"
 LOGDIR = tempfile.TemporaryDirectory()
-LOG = Path(LOGDIR.name) / "kanit-kancasi.log"
+LOG = Path(LOGDIR.name) / "evidence-hook.log"
 
 
 # The hook under a forced cp1252 code page: stdio wrappers and the locale encoding are cp1252 (like Windows cp1252/cp1254),

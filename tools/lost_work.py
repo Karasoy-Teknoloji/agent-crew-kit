@@ -3,7 +3,7 @@
 
   python3 tools/lost_work.py                      # scan the folder next to this clone, table, exit 1 if own work is at risk
   python3 tools/lost_work.py --root ~/src --root D:\\work --depth 3
-  python3 tools/lost_work.py --json | --brief | --hook | --no-fetch | --min-idle 1 | --push-unpushed | --notify | --cache-yaz
+  python3 tools/lost_work.py --json | --brief | --hook | --no-fetch | --min-idle 1 | --push-unpushed | --notify | --cache-write
 
 Per repo (every worktree of it) it reports:
   DIRTY     uncommitted or untracked files in a worktree
@@ -14,18 +14,18 @@ Per repo (every worktree of it) it reports:
   ORPHAN-WT linked worktree whose work is already in the integration branch (or whose directory is gone)
   STASH     stash entries (shared by all worktrees of the repo)
   BEHIND    local integration branch behind its origin
-  BAYAT     own UNMERGED branch whose first unique commit is older than STALE_DAY (3) working days (Mon-Fri, holidays ignored):
+  STALE     own UNMERGED branch whose first unique commit is older than STALE_DAY (3) working days (Mon-Fri, holidays ignored):
             by team rule it is merged to dev (green) or handed back to the board; shown first, with age and issue number
             parsed from the branch name ("issue yok" when it has none). Never `personal/*`.
   CLEANUP   own origin branches already merged and still present (delete candidates; never personal/*, the long-lived
             branch of a personal claude-shared variant)
 Others' commits and branches are counted separately (author names only), never part of the exit code.
 
-Exit code: 1 when own unpushed commits or dirty worktrees exist, else 0 (--hook always exits 0). BAYAT does not change it
+Exit code: 1 when own unpushed commits or dirty worktrees exist, else 0 (--hook always exits 0). STALE does not change it
 (the daily job ignores it); it is `summary.stale` in --json.
 `--min-idle H` ignores dirty/unpushed work touched in the last H hours (it is probably being worked on right now).
 The default root (the folder holding this clone) includes the claude-shared clone itself, so the installer's session-start report
-(tools/rules_watch.py shows the cached result; the daily job `--push-unpushed --cache-yaz` and a detached `--hook --cache-yaz` refresh write it) cover it,
+(tools/rules_watch.py shows the cached result; the daily job `--push-unpushed --cache-write` and a detached `--hook --cache-write` refresh write it) cover it,
 `personal/*` branches included.
 Read-only, except `--push-unpushed`, which pushes only branches whose unpushed commits are all your own (never someone else's work
 under this machine's credentials). Deleting is limited to what is provably lossless and only with `--clean-lossless` (the daily job): a
@@ -71,7 +71,7 @@ import lost_work_cache  # noqa: E402  (the result cache the session-start hook r
 LOG = logging.getLogger("lost-work")      # tools/runlog.py: ~/.local/state/lost-work.log (env LOST_WORK_LOG), rolling 1 MB x 64
 _VERBOSE = True  # --hook turns this off: only start and summary are logged
 _GIT_CALLS = 0
-_CACHE_RESULT = False  # --cache-yaz: this run owns the refresh lock and must release it however it ends
+_CACHE_RESULT = False  # --cache-write: this run owns the refresh lock and must release it however it ends
 _GIT_LOCK = threading.Lock()
 # Verdict cache for the expensive "is this branch really unmerged" test (cherry-pick filter + merge-tree), keyed by
 # repo|ref|tip sha|base sha, so a verdict is exact and never stale. The session-start hook has an 8 s budget; without it a few
@@ -406,7 +406,7 @@ def dirty_state(wt, head_ct, ignore):
 
 
 def analyse(repo, fetch, fetch_timeout, min_idle=0.0, ignore=(), deep=True, stale_only=False):
-    """deep=False is the --hook scan; stale_only then still looks at own unmerged branches, but only the ones old enough to be BAYAT."""
+    """deep=False is the --hook scan; stale_only then still looks at own unmerged branches, but only the ones old enough to be STALE."""
     now = time.time()
     wts = [w for w in worktrees(repo) if not w["bare"]]
     if not wts:
@@ -752,7 +752,7 @@ def rows_of(r):
             rows.append(("unpushed-others", u["branch"], f"{u['others']} commit(s) by {', '.join(u['other_authors'][:3])}"))
     for m in r["unmerged"]:
         if m["stale"]:
-            continue  # listed first, in the BAYAT block (stale_lines)
+            continue  # listed first, in the STALE block (stale_lines)
         rows.append(("UNMERGED", m["branch"], f"{m['own']} own commit(s), last {m['last']}, on {'+'.join(m['where'])}"))
     for o in r["orphan_worktrees"]:
         rows.append(("ORPHAN-WT", o["branch"], f"{o['reason']}{', still dirty' if o['dirty'] else ''}: {o['path']}"))
@@ -772,7 +772,7 @@ def rows_of(r):
 
 
 def stale_lines(repos, limit=None):
-    """Stale own branches (BAYAT), oldest first: `repo  branch  Nd (W working days)  issue #N | issue yok`."""
+    """Stale own branches (STALE), oldest first: `repo  branch  Nd (W working days)  issue #N | issue yok`."""
     items = sorted(((r, m) for r in repos for m in r["unmerged"] if m["stale"]),
                    key=lambda x: (-x[1]["working_days"], x[0]["repo"], x[1]["branch"]))
     out = [f"  {clean(r['repo'], 40)}  {clean(m['branch'], 60)}  {m['age_days']}d ({m['working_days']} working days, first commit {m['first']})  "
@@ -787,7 +787,7 @@ def summary_line(s):
     if s["dirty_worktrees"]:
         risk.append(f"{s['dirty_worktrees']} dirty worktree(s)")
     other = [f"{s[k]} {label}" for k, label in (
-        ("stale", f"BAYAT branch(es) (own, unmerged for more than {STALE_DAY} working days)"),
+        ("stale", f"STALE branch(es) (own, unmerged for more than {STALE_DAY} working days)"),
         ("unmerged_branches", "unmerged own branch(es)"), ("orphan_worktrees", "orphan worktree(s)"),
         ("stashes", "stash(es)"), ("cleanup", "merged origin branch(es) to delete"),
         ("fetch_failed", "repo(s) with failed fetch (refs stale)")) if s[k]]
@@ -805,9 +805,9 @@ def risky_lines(repos):
 
 
 def hook_message(summ, repos, skipped=0, n_repos=0, budget=0):
-    """The session-start report (human text): at-risk repos, BAYAT count and the oldest 5, and a note when the scan was cut short.
+    """The session-start report (human text): at-risk repos, STALE count and the oldest 5, and a note when the scan was cut short.
     "" when nothing is at risk, nothing is stale and nothing was skipped. The ONE place this text is built: --hook prints it,
-    --cache-yaz stores it for tools/rules_watch.py."""
+    --cache-write stores it for tools/rules_watch.py."""
     details = (f"Details: python3 {REPO_ROOT.joinpath('tools', 'lost_work.py').as_posix()}"
                " (--push-unpushed pushes own branches, never main/master/test/dev, never force)")
     # a scan cut short by the budget is never silent: unscanned repos may hold work at risk
@@ -815,7 +815,7 @@ def hook_message(summ, repos, skipped=0, n_repos=0, budget=0):
                if skipped > 0 else "")
     stale = ""
     if summ["stale"]:
-        stale = (f"Stale branches (BAYAT): {summ['stale']} own branch(es) unmerged for more than {STALE_DAY} working days"
+        stale = (f"Stale branches: {summ['stale']} own branch(es) unmerged for more than {STALE_DAY} working days"
                  " (oldest 5; merge to dev if green and still wanted, or hand back):\n" + "\n".join(stale_lines(repos, 5)))
     if summ["at_risk"] or stale:
         return "Lost-work check: " + summary_line(summ) + ("\n" + "\n".join(risky_lines(repos)[:5]) if summ["at_risk"] else "") \
@@ -828,7 +828,7 @@ def hook_message(summ, repos, skipped=0, n_repos=0, budget=0):
 def print_table(repos, summ):
     bl = stale_lines(repos)
     if bl:
-        print(f"BAYAT: {len(bl)} own branch(es) unmerged for more than {STALE_DAY} working days "
+        print(f"STALE: {len(bl)} own branch(es) unmerged for more than {STALE_DAY} working days "
               "(merge to dev if green and still wanted, or hand back to the board):")
         print("\n".join(bl))
     for r in sorted(repos, key=lambda x: x["repo"].lower()):
@@ -868,7 +868,7 @@ def main():
 
 
 def take_refresh_lock():
-    """--cache-yaz: ONE refresh at a time across the session hook's background run and the daily job (same lock, tools/lost_work_cache.py).
+    """--cache-write: ONE refresh at a time across the session hook's background run and the daily job (same lock, tools/lost_work_cache.py).
     The hook's background run (rules_watch.py --refresh) holds the lock itself and says so with LOST_LOCK_OWNER=1: nothing to take
     and nothing to release here (False). Otherwise wait up to 5 minutes for a running refresh, then take the lock (a lock older than
     lost_work_cache.LOCK_MAX is taken over); True = this run owns it and releases it at the end. After the wait the scan runs anyway
@@ -912,7 +912,7 @@ def run():
                     "protected or personal branches, never anything touched in the last --clean-idle hours; runs after --push-unpushed)")
     ap.add_argument("--clean-idle", type=float, default=CLEAN_IDLE_H, metavar="H",
                     help="--clean-lossless leaves worktrees and branches touched within H hours alone (default 2)")
-    ap.add_argument("--cache-yaz", action="store_true", help="also store the result (summary and the session-start report text) in "
+    ap.add_argument("--cache-write", action="store_true", help="also store the result (summary and the session-start report text) in "
                     "the cache file tools/rules_watch.py reads instead of scanning at session start (tools/lost_work_cache.py; env LOST_WORK_LAST)")
     ap.add_argument("--notify", action="store_true", help="desktop notification when work is at risk (Windows toast / notify-send, tools/notifier.py)")
     a = ap.parse_args()
@@ -922,7 +922,7 @@ def run():
     FETCH_SLOTS = threading.BoundedSemaphore(a.fetch_jobs)
     global _VERBOSE, _CACHE_RESULT
     _VERBOSE = not a.hook
-    _CACHE_RESULT = a.cache_yaz and take_refresh_lock()
+    _CACHE_RESULT = a.cache_write and take_refresh_lock()
     mode = "hook" if a.hook else "json" if a.json else "brief" if a.brief else "table"
     log("start pid=%d mode=%s args=%s", os.getpid(), mode, " ".join(clean(x, 200) for x in sys.argv[1:]))
 
@@ -958,7 +958,7 @@ def run():
     log("summary %s", summary_line(summ))
 
     msg = hook_message(summ, repos, skipped, len(groups), a.budget)
-    if a.cache_yaz:
+    if a.cache_write:
         lost_work_cache.write(summ, msg, cleaned if a.clean_lossless else None)
     if a.hook:
         if msg:

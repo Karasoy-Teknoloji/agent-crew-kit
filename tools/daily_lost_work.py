@@ -15,7 +15,7 @@ import sys
 TOOLS = os.path.dirname(os.path.realpath(__file__))
 TARGET = os.path.join(TOOLS, "lost_work.py")
 # push own unpushed branches, remove lossless worktrees/branches, short report, notify, refresh the session-start cache
-ARGS = ["--push-unpushed", "--clean-lossless", "--brief", "--notify", "--min-idle", "1", "--cache-yaz"]
+ARGS = ["--push-unpushed", "--clean-lossless", "--brief", "--notify", "--min-idle", "1", "--cache-write"]
 
 
 def main():

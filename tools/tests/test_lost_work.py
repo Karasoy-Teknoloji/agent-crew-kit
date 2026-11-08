@@ -214,7 +214,7 @@ class LostWorkTest(unittest.TestCase):
         self.assertEqual([u["branch"] for u in res["unpushed"]], ["fix/mine"])
         self.assertEqual(res["unpushed"][0]["own"], 1)
 
-    # -- BAYAT: own unmerged branches whose first unique commit is older than 3 working days
+    # -- STALE: own unmerged branches whose first unique commit is older than 3 working days
     def dated_commit(self, repo, fname, msg, when):
         """A commit whose author and committer time is `when` (a datetime, local time)."""
         iso = when.strftime("%Y-%m-%dT%H:%M:%S")
@@ -276,7 +276,7 @@ class LostWorkTest(unittest.TestCase):
     def test_stale_json_fields_and_exit_code(self):
         self.stale_fixture()
         rc, repo, summ = self.report()
-        self.assertEqual(rc, 0)  # BAYAT never changes the exit code
+        self.assertEqual(rc, 0)  # STALE never changes the exit code
         self.assertEqual(summ["stale"], 2)
         rows = {m["branch"]: m for m in repo["unmerged"]}
         self.assertEqual(set(rows), {"duzeltme/2403-old-work", "ozellik/old-issuesiz", "ozellik/taze"})
@@ -293,14 +293,14 @@ class LostWorkTest(unittest.TestCase):
     def test_stale_work_listed_first_in_the_table_and_brief(self):
         self.stale_fixture()
         out = self.run_tool().stdout
-        self.assertTrue(out.startswith("BAYAT: 2 own branch(es)"), out)
+        self.assertTrue(out.startswith("STALE: 2 own branch(es)"), out)
         self.assertIn("issue #2403", out)
         self.assertIn("issue yok", out)
         self.assertEqual(out.count("duzeltme/2403-old-work"), 1)  # not repeated in the per-repo table
         self.assertIn("ozellik/taze", out)
         self.assertIn("UNMERGED", out)
         brief = self.run_tool("--brief").stdout
-        self.assertIn("2 BAYAT branch(es)", brief.splitlines()[0])
+        self.assertIn("2 STALE branch(es)", brief.splitlines()[0])
         self.assertIn("duzeltme/2403-old-work", brief)
 
     def test_stale_in_hook_message_without_the_at_risk_wording(self):
@@ -309,7 +309,7 @@ class LostWorkTest(unittest.TestCase):
         out = json.loads(r.stdout)
         self.assertEqual((r.returncode, list(out)), (0, ["systemMessage"]))
         msg = out["systemMessage"]
-        self.assertIn("Stale branches (BAYAT): 2 own branch(es)", msg)
+        self.assertIn("Stale branches: 2 own branch(es)", msg)
         self.assertIn("duzeltme/2403-old-work", msg)
         self.assertNotIn("ozellik/taze", msg)
         self.assertNotIn("AT RISK", msg)  # rules_watch keys its model sentence on that word: unpushed/dirty only
@@ -776,33 +776,33 @@ class LostWorkTest(unittest.TestCase):
         self.run_tool("--hook")
         self.assertFalse(self.last().exists())
 
-    def test_cache_yaz_stores_the_hook_report_with_timestamp_and_host(self):
+    def test_cache_write_stores_the_hook_report_with_timestamp_and_host(self):
         self.stale_fixture()
         before = time.time()
-        r = self.run_tool("--hook", "--cache-yaz")
+        r = self.run_tool("--hook", "--cache-write")
         shown = json.loads(r.stdout)["systemMessage"]
         d = json.loads(self.last().read_text(encoding="utf-8"))
         self.assertEqual(d["message"], shown)   # one text builder: what --hook prints is what the session start shows later
-        self.assertIn("Stale branches (BAYAT): 2 own branch(es)", d["message"])
+        self.assertIn("Stale branches: 2 own branch(es)", d["message"])
         self.assertEqual(d["summary"]["stale"], 2)
         self.assertGreaterEqual(d["ts"], int(before) - 1)
         self.assertEqual(d["host"], __import__("platform").node())
         self.assertEqual([f.name for f in self.last().parent.glob("lost-work-last.json.*")], [])   # no temp file left
 
     def test_full_scan_also_writes_the_cache_and_a_quiet_result_is_an_empty_message(self):
-        r = self.run_tool("--json", "--cache-yaz")
+        r = self.run_tool("--json", "--cache-write")
         self.assertEqual(r.returncode, 0, r.stderr)
         d = json.loads(self.last().read_text(encoding="utf-8"))
         self.assertEqual((d["message"], d["summary"]["at_risk"]), ("", False))
         self.git(self.clone, "checkout", "-q", "-b", "ozellik/x")
         self.commit(self.clone, "x.txt", "one")
-        self.run_tool("--json", "--cache-yaz")
+        self.run_tool("--json", "--cache-write")
         self.assertIn("AT RISK", json.loads(self.last().read_text(encoding="utf-8"))["message"])
 
     def test_the_run_takes_and_releases_the_shared_refresh_lock(self):
         ks = self.lost_work_cache()
         lock = self.last().with_name("lost-work-last.json.lock")
-        self.run_tool("--hook", "--cache-yaz")
+        self.run_tool("--hook", "--cache-write")
         self.assertFalse(lock.exists())          # taken at the start (one refresh at a time), released however it ends
         self.assertTrue(self.last().exists())
 
@@ -812,7 +812,7 @@ class LostWorkTest(unittest.TestCase):
         lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_text("", encoding="utf-8")    # held by rules_watch.py --refresh, which started this scan
         self.env["LOST_LOCK_OWNER"] = "1"
-        self.run_tool("--hook", "--cache-yaz")
+        self.run_tool("--hook", "--cache-write")
         self.assertTrue(lock.exists())           # neither waited for nor released here
         self.assertTrue(self.last().exists())
 
@@ -871,7 +871,7 @@ class LostWorkTest(unittest.TestCase):
     def test_clean_lossless_removes_a_clean_merged_worktree_and_its_branch(self):
         wt = self.merged_worktree("ozellik/done")
         tip = self.git(wt, "rev-parse", "HEAD")
-        data = self.clean("--cache-yaz")
+        data = self.clean("--cache-write")
         self.assertFalse(wt.exists())
         self.assertNotIn("ozellik/done", self.branches())
         self.assertEqual([(c["kind"], c["branch"], c["sha"]) for c in data["cleaned"]],
