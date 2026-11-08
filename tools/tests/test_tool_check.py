@@ -16,7 +16,7 @@ def missing(*_):
 
 
 class Table(unittest.TestCase):
-    def test_names_unique_ve_each_tool_one_path_present(self):
+    def test_names_unique_and_each_tool_one_path_present(self):
         names = [t.name for t in a.TOOLS]
         self.assertEqual(len(names), len(set(names)))
         for t in a.TOOLS:
@@ -43,13 +43,13 @@ class Commands(unittest.TestCase):
         k = a.install_commands(self.tool("pdftoppm"), "linux", "python3", pm="apt")
         self.assertEqual(k[0][-4:], ["apt-get", "install", "-y", "poppler-utils"][-4:])
 
-    def test_pip_user_windows_ve_apt_linux(self):
+    def test_pip_user_windows_and_apt_linux(self):
         pypdf = self.tool("pypdf")
         k = a.install_commands(pypdf, "windows", "C:/py/python.exe", pm="winget")
         self.assertEqual(k, [["C:/py/python.exe", "-m", "pip", "install", "--user", "pypdf"]])
         self.assertIn("python3-pypdf", a.install_commands(pypdf, "linux", "python3", pm="apt")[0])
 
-    def test_docker_ve_govc_never_automatic(self):
+    def test_docker_and_govc_never_automatic(self):
         for os_id, pm in (("windows", "winget"), ("linux", "apt"), ("macos", "brew")):
             self.assertEqual(a.install_commands(self.tool("docker"), os_id, "py", pm=pm), [])
         self.assertEqual(a.install_commands(self.tool("govc"), "linux", "python3", pm="apt"), [])

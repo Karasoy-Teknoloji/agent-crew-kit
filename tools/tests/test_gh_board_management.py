@@ -42,8 +42,8 @@ class ManagementCompute(unittest.TestCase):
         self.assertEqual(gh_board.compute_management(parent)[0], 50)   # 2 of 4, the two unfetched count as not started
 
     def test_no_checklist_is_zero_and_flagged(self):
-        self.assertEqual(gh_board.compute_management(issue("only prose [ ] not a list")), (0, "checklist yok", "Todo"))
-        self.assertEqual(gh_board.compute_management(issue(None))[1], "checklist yok")
+        self.assertEqual(gh_board.compute_management(issue("only prose [ ] not a list")), (0, "no checklist", "Todo"))
+        self.assertEqual(gh_board.compute_management(issue(None))[1], "no checklist")
 
     def test_code_fence_ignored(self):
         self.assertEqual(gh_board.checklist_counts("- [x] a\n```\n- [ ] sample\n```\n- [ ] b"), (1, 2))
@@ -54,12 +54,12 @@ class ManagementCompute(unittest.TestCase):
 
     def test_status_from_product_board_ignores_own_project(self):
         self.assertEqual(gh_board.compute_management(issue("- [ ] a", boards=[(9, "👀 In review"), (47, "Done")]))[2], "In review")
-        self.assertEqual(gh_board.compute_management(issue("- [ ] a", boards=[(11, "Yapay Zeka")]))[2], "Todo")
+        self.assertEqual(gh_board.compute_management(issue("- [ ] a", boards=[(11, "AI queue")]))[2], "Todo")
         self.assertEqual(gh_board.compute_management(issue("- [ ] a", boards=[(11, "In Progress")]))[2], "In Progress")
 
     def test_shared_queue_never_sets_status(self):
         self.assertEqual(gh_board.compute_management(issue("- [ ] a", boards=[(11, "In Progress"), (46, "In review")]))[2], "In Progress")
-        self.assertEqual(gh_board.compute_management(issue("- [ ] a", boards=[(11, "⏳ Cevap bekleniyor")]))[2], "In Progress")
+        self.assertEqual(gh_board.compute_management(issue("- [ ] a", boards=[(11, "⏳ Awaiting reply")]))[2], "In Progress")
         self.assertEqual(gh_board.compute_management(issue("- [ ] a", boards=[(11, "In Progress"), (46, "Done")])), (0, "", "In Progress"))
         self.assertEqual(gh_board.compute_management(issue("- [ ] a", boards=[(46, "In review")]))[2], "Todo")
         self.assertEqual(gh_board.compute_management(issue("- [ ] a", state="CLOSED", boards=[(46, "In review")]))[2], "Done")

@@ -21,7 +21,7 @@ What it does per call (state in ~/.cache/gh-limit, shared through flock by every
   - `gh api` GETs get an ETag cache (If-None-Match; a 304 replays the cached output, and 304s do not count against the primary limit);
   - `gh run watch` / `gh pr checks --watch` get `--interval 30` unless an interval is given (gh polls every 3-10 s by default);
   - when fewer than 1500 calls of the hourly core/graphql budget are left (x-ratelimit-* of earlier answers), calls are paced so
-    the rest lasts until the reset (shared by MAKINE=2 machines, at most 30 s apart) instead of running dry and stalling everyone;
+    the rest lasts until the reset (shared by GH_LIMIT_MACHINE=2 machines, at most 30 s apart) instead of running dry and stalling everyone;
   - one JSON line per call in ~/.cache/gh-limit/log (class, endpoint, status, waits, attempts, remaining budget).
 Everything else passes through unchanged: arguments, stdin, exit code, output. `gh auth` (the git credential helper), `gh help`,
 `gh --version`, nested calls (GH_LIMIT_ACTIVE) and GH_LIMIT_CLOSED=1 go straight to the real gh.
@@ -65,7 +65,7 @@ PACE_UPPER = 30.0             # never space calls more than this (s): slower, bu
 WATCH_INTERVAL = int(os.environ.get("GH_LIMIT_WATCH_INTERVAL", "30"))   # poll interval forced on `gh run watch` / `--watch`
 CACHE_UPPER = 2 * 1024 * 1024
 MARKER = "# gh-limit shim"   # marker line of the shim we write; --install/--remove never touch a ~/.local/bin/gh without it
-PROFILE_BAS, PROFILE_LAST = "# >>> gh-limit (tools/gh_limit.py --install) >>>", "# <<< gh-limit <<<"   # managed block of the pwsh profile
+PROFILE_BEGIN, PROFILE_END = "# >>> gh-limit (tools/gh_limit.py --install) >>>", "# <<< gh-limit <<<"   # managed block of the pwsh profile
 
 # bucket: (min gap s, max per minute, max per hour)
 BUCKET = {"write": (1.0, 60, 450), "search": (2.0, 25, 10**9), "code_search": (6.5, 9, 10**9)}
@@ -128,25 +128,25 @@ def api_parse(args):
 
 
 def classify(args):
-    """(class, endpoint label, api-parse or None). Classes: gecis, izle, yazma, arama, code_search, graphql, okuma."""
-    poz = [a for a in args if not a.startswith("-")]
-    if not args or args[0] in TRANSITION or (poz and poz[0] in TRANSITION) or "--help" in args or "-h" in args[:3]:
+    """(class, endpoint label, api-parse or None). Classes: transition, watch, write, search, code_search, graphql, read."""
+    pos = [a for a in args if not a.startswith("-")]
+    if not args or args[0] in TRANSITION or (pos and pos[0] in TRANSITION) or "--help" in args or "-h" in args[:3]:
         return "transition", " ".join(args[:2]), None
-    group = poz[0] if poz else args[0]
-    verb = poz[1] if len(poz) > 1 else ""
+    group = pos[0] if pos else args[0]
+    verb = pos[1] if len(pos) > 1 else ""
     if group == "api":
         p = api_parse(args[args.index("api") + 1:])
-        uc = p["endpoint"] or ""
-        label = "api %s %s" % (p["method"], uc_normal(uc))
-        if uc == "graphql":
+        ep = p["endpoint"] or ""
+        label = "api %s %s" % (p["method"], normalize_endpoint(ep))
+        if ep == "graphql":
             text = " ".join(p["field"]) + " " + (p["input"] or "")
             return ("write" if re.search(r"\bmutation\b", text) else "graphql"), label, p
-        path = uc.lstrip("/")
+        path = ep.lstrip("/")
         if path.startswith("search/code"):
             return "code_search", label, p
         if path.startswith("search/"):
             return "search", label, p
-        return ("okuma" if p["method"] in ("GET", "HEAD") else "write"), label, p
+        return ("read" if p["method"] in ("GET", "HEAD") else "write"), label, p
     label = "%s %s" % (group, verb)
     if (group, verb) in WATCH or "--watch" in args:
         return "watch", label, None
@@ -154,7 +154,7 @@ def classify(args):
         return ("code_search" if verb == "code" else "search"), label, None
     if verb in WRITE.get(group, ()):
         return "write", label, None
-    return "okuma", label, None
+    return "read", label, None
 
 
 def watch_interval(args):
@@ -164,13 +164,13 @@ def watch_interval(args):
     return args + ["--interval", str(WATCH_INTERVAL)]
 
 
-def pr_short_devre(args):
+def pr_short_circuit(args):
     """Branch-lookup `gh pr view` / `gh pr status` (no PR number or URL) is answered locally: the team never opens PRs in its own repos, and
     Claude Code's PR-status lookup in every session made these the top caller (778 of 3102 calls in 20 min, 04.11.2026).
     GH_LIMIT_PR=1 turns it off; an explicit PR number/URL/branch argument always goes to GitHub."""
     if os.environ.get("GH_LIMIT_PR") == "1":
         return False
-    poz = []
+    pos = []
     i = 0
     while i < len(args):
         a = args[i]
@@ -178,14 +178,14 @@ def pr_short_devre(args):
             i += 2
             continue
         if not a.startswith("-"):
-            poz.append(a)
+            pos.append(a)
         i += 1
-    return poz[:2] == ["pr", "status"] or (poz[:2] == ["pr", "view"] and len(poz) == 2)
+    return pos[:2] == ["pr", "status"] or (pos[:2] == ["pr", "view"] and len(pos) == 2)
 
 
-def uc_normal(uc):
+def normalize_endpoint(ep):
     """Endpoint label for the log: query string dropped, numbers -> :n, shas -> :sha (owner/repo kept, they matter for the top list)."""
-    path = uc.split("?", 1)[0].lstrip("/")
+    path = ep.split("?", 1)[0].lstrip("/")
     part = []
     for s in path.split("/"):
         if s.isdigit():
@@ -199,18 +199,18 @@ def uc_normal(uc):
 # ---------------------------------------------------------------- limiter math (pure)
 
 def reserved(times, now, interval, minutes_upper, hour_upper):
-    """Earliest start time t >= simdi for a new call given the reserved start times `times` (sorted): t is at least `interval` after
+    """Earliest start time t >= now for a new call given the reserved start times `times` (sorted): t is at least `interval` after
     the last one, and the windows (t-60, t] and (t-3600, t] keep below their caps."""
     z = sorted(times)
     t = max(now, (z[-1] + interval) if z else now)
     for _ in range(10000):
         last_min = [x for x in z if x > t - 60]
-        son_sa = [x for x in z if x > t - 3600]
+        last_hour = [x for x in z if x > t - 3600]
         if len(last_min) >= minutes_upper:
             t = last_min[len(last_min) - minutes_upper] + 60.0
             continue
-        if len(son_sa) >= hour_upper:
-            t = son_sa[len(son_sa) - hour_upper] + 3600.0
+        if len(last_hour) >= hour_upper:
+            t = last_hour[len(last_hour) - hour_upper] + 3600.0
             continue
         return t
     return t
@@ -218,7 +218,7 @@ def reserved(times, now, interval, minutes_upper, hour_upper):
 
 def pace_interval(remaining, reset_at, now):
     """Seconds between calls of one machine so the hourly budget lasts until its reset: 0 while more than PACE_THRESHOLD calls are left,
-    else (seconds to reset) / (calls left - PACE_BACKUP) * MAKINE, capped at PACE_UPPER."""
+    else (seconds to reset) / (calls left - PACE_BACKUP) * MACHINE, capped at PACE_UPPER."""
     if remaining is None or reset_at is None or reset_at <= now or remaining > PACE_THRESHOLD:
         return 0.0
     return min((reset_at - now) / max(remaining - PACE_BACKUP, 1) * MACHINE, PACE_UPPER)
@@ -241,10 +241,10 @@ def wait_pace(res):
         interim = pace_interval(b and b.get("remaining"), b and b.get("reset"), now)
         if not interim:
             return now
-        z = [x for x in st.get("tempo_" + res, []) if x > now - 3600]
+        z = [x for x in st.get("pace_" + res, []) if x > now - 3600]
         t = reserved(z[-50:], now, interim, 10**9, 10**9)
         t = min(t, now + 60.0)   # bounded backlog: one call waits at most 60 s (agent tool timeouts), never piles up
-        st["tempo_" + res] = z[-50:] + [t]
+        st["pace_" + res] = z[-50:] + [t]
         return t
     wait = max(change_status(f) - time.time(), 0.0)
     if wait:
@@ -252,15 +252,15 @@ def wait_pace(res):
     return wait
 
 
-def save_budget(bas_h):
-    res, remaining, reset = bas_h.get("x-ratelimit-resource"), bas_h.get("x-ratelimit-remaining"), bas_h.get("x-ratelimit-reset")
+def save_budget(hdrs):
+    res, remaining, reset = hdrs.get("x-ratelimit-resource"), hdrs.get("x-ratelimit-remaining"), hdrs.get("x-ratelimit-reset")
     if res and remaining and remaining.isdigit() and reset and reset.isdigit():
         change_status(lambda st: st.setdefault("budget", {}).__setitem__(res, {"remaining": int(remaining), "reset": int(reset)}))
 
 
 def waiting_duration(attempt, retry_after=None, remaining=None, reset_at=None, now=None):
     """Seconds to wait after a rate-limited answer (GitHub's documented order): retry-after; x-ratelimit-reset when remaining is 0;
-    else 60 s doubling per attempt (deneme = 1, 2, ...), capped at WAIT_UPPER. Returns (seconds, primary_exhausted)."""
+    else 60 s doubling per attempt (attempt = 1, 2, ...), capped at WAIT_UPPER. Returns (seconds, primary_exhausted)."""
     now = time.time() if now is None else now
     if retry_after is not None:
         return min(max(float(retry_after), 1.0), WAIT_UPPER), False
@@ -269,8 +269,8 @@ def waiting_duration(attempt, retry_after=None, remaining=None, reset_at=None, n
     return min(60.0 * (2 ** (attempt - 1)), WAIT_UPPER), False
 
 
-def split_title(data):
-    """Split `gh api -i` stdout into (status, headers{lower: value}, body bytes). Unknown shape -> (None, {}, veri)."""
+def split_headers(data):
+    """Split `gh api -i` stdout into (status, headers{lower: value}, body bytes). Unknown shape -> (None, {}, data)."""
     if not data.startswith(b"HTTP/"):
         return None, {}, data
     for delimiter in (b"\r\n\r\n", b"\n\n"):
@@ -284,25 +284,25 @@ def split_title(data):
         status = int(lines[0].split()[1])
     except (IndexError, ValueError):
         return None, {}, data
-    bas = {}
+    headers = {}
     for s in lines[1:]:
         if ":" in s:
             a, d = s.split(":", 1)
-            bas[a.strip().lower()] = d.strip()
-    return status, bas, data[k + len(delimiter):]
+            headers[a.strip().lower()] = d.strip()
+    return status, headers, data[k + len(delimiter):]
 
 
-def limited_mi(status, bas, rc, stderr):
+def is_limited(status, headers, rc, stderr):
     """True for a rate-limit answer (primary or secondary), False for any other result."""
     if status in (403, 429):
-        return status == 429 or "retry-after" in bas or bas.get("x-ratelimit-remaining") == "0" or bool(LIMIT_RE.search(stderr))
+        return status == 429 or "retry-after" in headers or headers.get("x-ratelimit-remaining") == "0" or bool(LIMIT_RE.search(stderr))
     return rc != 0 and status is None and bool(LIMIT_RE.search(stderr))
 
 
 # ---------------------------------------------------------------- shared state (flock)
 
 def lock(f, unblocked):
-    """Exclusive lock on an open file, released when it is closed (or the process dies). OSError when engelsiz and it is taken."""
+    """Exclusive lock on an open file, released when it is closed (or the process dies). OSError when it is not free and it is taken."""
     if fcntl:
         fcntl.flock(f, fcntl.LOCK_EX | (fcntl.LOCK_NB if unblocked else 0))
         return
@@ -336,7 +336,7 @@ class Lock:
 
 
 def change_status(fn):
-    """Read-modify-write ~/.cache/gh-limit/kova.json under its lock; fn(state) returns a value."""
+    """Read-modify-write ~/.cache/gh-limit/bucket.json under its lock; fn(state) returns a value."""
     with Lock(DIR / "bucket.lock"):
         path = DIR / "bucket.json"
         try:
@@ -361,12 +361,12 @@ def wait_bucket(kind):
     """Reserve a start time in the class bucket; sleep until it. Returns the seconds waited."""
     if kind not in BUCKET:
         return 0.0
-    interval, min_, sa = BUCKET[kind]
+    interval, per_minute, per_hour = BUCKET[kind]
     now = time.time()
 
     def f(st):
         z = [x for x in st.get(kind, []) if x > now - 3600]
-        t = reserved(z, now, interval, min_, sa)
+        t = reserved(z, now, interval, per_minute, per_hour)
         t = min(t, now + 60.0)   # bounded backlog: a write waits at most 60 s; past the caps GitHub's 403 + retry takes over
         z.append(t)
         st[kind] = z
@@ -397,18 +397,18 @@ def pause_put(seconds):
 
 def slot_al(time_overrun=600.0):
     """Take one of SLOTS lock files (non-blocking scan, 0.2 s pause between scans). After time_overrun run without a slot."""
-    bas = time.time()
+    started = time.time()
     while True:
         for i in range(SLOTS):
             k = Lock(DIR / ("slot.%d" % i), unblocked=True)
             if k.__enter__():
-                return k, time.time() - bas
-        if time.time() - bas > time_overrun:
-            return None, time.time() - bas
+                return k, time.time() - started
+        if time.time() - started > time_overrun:
+            return None, time.time() - started
         time.sleep(0.2)
 
 
-def log_yaz(record):
+def log_write(record):
     path = DIR / "log"
     try:
         if path.exists() and path.stat().st_size > LOG_UPPER:
@@ -471,7 +471,7 @@ def run_cmd(args):
     kind, label, p = classify(args)
     if kind == "transition":
         transition(gh, args)
-    if pr_short_devre(args):
+    if pr_short_circuit(args):
         try:
             branch = hidden.run(["git", "branch", "--show-current"], capture_output=True, text=True, timeout=10).stdout.strip()
         except (OSError, subprocess.SubprocessError):
@@ -481,16 +481,16 @@ def run_cmd(args):
             DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         except OSError:
             pass
-        log_yaz({"t": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "h": socket.gethostname(), "pid": os.getpid(), "kind": "local",
-                 "uc": label, "status": None, "rc": 1, "cache": True, "short_devre": True})
+        log_write({"t": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "h": socket.gethostname(), "pid": os.getpid(), "kind": "local",
+                 "endpoint": label, "status": None, "rc": 1, "cache": True, "short_circuit": True})
         return 1
     try:
         DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     except OSError:
         transition(gh, args)
     env = dict(os.environ, GH_LIMIT_ACTIVE="1")
-    record = {"t": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "h": socket.gethostname(), "pid": os.getpid(), "kind": kind, "uc": label}
-    bas = time.time()
+    record = {"t": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "h": socket.gethostname(), "pid": os.getpid(), "kind": kind, "endpoint": label}
+    started = time.time()
     buffer = not sys.stdout.isatty() and kind != "watch" and os.environ.get("GH_LIMIT_FLOW") != "1"
 
     if kind == "watch":
@@ -505,8 +505,8 @@ def run_cmd(args):
         finally:
             if slot:
                 slot.__exit__()
-        record.update(rc=rc, wait=round(wait + sw, 2), duration=round(time.time() - bas, 2), mod="flow")
-        log_yaz(record)
+        record.update(rc=rc, wait=round(wait + sw, 2), duration=round(time.time() - started, 2), mod="flow")
+        log_write(record)
         return rc
 
     stdin_data = None
@@ -537,31 +537,31 @@ def run_cmd(args):
             if slot:
                 slot.__exit__()
         out, err = r.stdout, r.stderr
-        status, bas_h = None, {}
+        status, hdrs = None, {}
         if inject:
-            status, bas_h, out = split_title(out)
-            save_budget(bas_h)
+            status, hdrs, out = split_headers(out)
+            save_budget(hdrs)
         err_text = err.decode("utf-8", "replace")
-        if limited_mi(status, bas_h, r.returncode, err_text) and attempt <= MAX_ATTEMPT:
-            ra = bas_h.get("retry-after")
-            remaining = bas_h.get("x-ratelimit-remaining")
+        if is_limited(status, hdrs, r.returncode, err_text) and attempt <= MAX_ATTEMPT:
+            ra = hdrs.get("retry-after")
+            remaining = hdrs.get("x-ratelimit-remaining")
             sec, primary = waiting_duration(attempt, float(ra) if ra and ra.replace(".", "", 1).isdigit() else None,
-                                          int(remaining) if remaining and remaining.isdigit() else None, bas_h.get("x-ratelimit-reset"))
-            log_yaz(dict(record, status=status, rc=r.returncode, attempt=attempt, limited=True, wait_after=round(sec, 1)))
+                                          int(remaining) if remaining and remaining.isdigit() else None, hdrs.get("x-ratelimit-reset"))
+            log_write(dict(record, status=status, rc=r.returncode, attempt=attempt, limited=True, wait_after=round(sec, 1)))
             if sec > PAUSE_UPPER:      # primary budget gone for a long time: fail now with gh's own message
                 break
             pause_put(sec)
             continue
         break
     rc = r.returncode
-    cache_ = False
+    from_cache = False
     if status == 304 and cache is not None:
-        out, err, rc, cache_ = cache["out"].encode("latin-1"), b"", 0, True
-    elif key and status == 200 and rc == 0 and bas_h.get("etag") and len(out) <= CACHE_UPPER:
+        out, err, rc, from_cache = cache["out"].encode("latin-1"), b"", 0, True
+    elif key and status == 200 and rc == 0 and hdrs.get("etag") and len(out) <= CACHE_UPPER:
         try:
             (DIR / "etag").mkdir(exist_ok=True, mode=0o700)
             tmp = DIR / "etag" / (key + ".tmp%d" % os.getpid())
-            tmp.write_text(json.dumps({"etag": bas_h["etag"], "out": out.decode("latin-1"), "t": time.time()}))
+            tmp.write_text(json.dumps({"etag": hdrs["etag"], "out": out.decode("latin-1"), "t": time.time()}))
             os.replace(tmp, DIR / "etag" / (key + ".json"))
         except OSError:
             pass
@@ -569,13 +569,13 @@ def run_cmd(args):
     sys.stdout.buffer.flush()
     sys.stderr.buffer.write(err)
     sys.stderr.buffer.flush()
-    record.update(status=status, rc=rc, attempt=attempt, wait=round(wait_total, 2), duration=round(time.time() - bas, 2))
+    record.update(status=status, rc=rc, attempt=attempt, wait=round(wait_total, 2), duration=round(time.time() - started, 2))
     for k, a in (("remaining", "x-ratelimit-remaining"), ("source", "x-ratelimit-resource")):
-        if a in bas_h:
-            record[k] = bas_h[a]
-    if cache_:
+        if a in hdrs:
+            record[k] = hdrs[a]
+    if from_cache:
         record["cache"] = True
-    log_yaz(record)
+    log_write(record)
     return rc
 
 
@@ -638,7 +638,7 @@ def profile_path():
 
 def profile_block(bin_dir):
     return ("%s\r\n$__ghs = '%s'; $env:Path = $__ghs + ';' + (($env:Path -split ';' | Where-Object { $_ -ne $__ghs }) -join ';')\r\n%s\r\n"
-            % (PROFILE_BAS, str(bin_dir).replace("'", "''"), PROFILE_LAST))
+            % (PROFILE_BEGIN, str(bin_dir).replace("'", "''"), PROFILE_END))
 
 
 def write_profile(path, bin_dir, remove, tag, whatif):
@@ -647,16 +647,16 @@ def write_profile(path, bin_dir, remove, tag, whatif):
         old = path.read_bytes().decode("utf-8-sig")   # bytes: keep the file's own line endings
     except OSError:
         old = ""
-    bas = old.find(PROFILE_BAS)
-    last = old.find(PROFILE_LAST, bas) if bas >= 0 else -1
-    clean = old if bas < 0 or last < 0 else (old[:bas] + old[last + len(PROFILE_LAST):].lstrip("\r\n"))
+    begin = old.find(PROFILE_BEGIN)
+    end = old.find(PROFILE_END, begin) if begin >= 0 else -1
+    clean = old if begin < 0 or end < 0 else (old[:begin] + old[end + len(PROFILE_END):].lstrip("\r\n"))
     new = clean if remove else (clean.rstrip("\r\n") + ("\r\n" if clean.strip() else "") + profile_block(bin_dir))
     if new.strip() == "" and remove:
         new = ""
     if new == old:
-        print("%sgh-limit: profil ayni: %s" % (tag, path))
+        print("%sgh-limit: profile same: %s" % (tag, path))
         return
-    print("%sgh-limit: profil %s: %s" % (tag, "clean" if remove else "write", path))
+    print("%sgh-limit: profile %s: %s" % (tag, "clean" if remove else "write", path))
     if not whatif:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(new.encode("utf-8"))
@@ -671,12 +671,12 @@ def install(remove=False, target=None, whatif=False):
     ps1 = target.with_name(target.name + ".ps1")
     ours = target.is_file() and MARKER in target.read_text(errors="replace")
     if target.exists() and not ours:
-        print("gh-limit: UYARI: %s baska bir dosya, dokunulmadi" % target)
+        print("gh-limit: WARNING: %s is another file, left untouched" % target)
         return 1
     if remove:
         for d in ([target, ps1] if WINDOWS else [target]):
             if d.is_file() and MARKER in d.read_text(errors="replace"):
-                print("%sgh-limit: sil: %s" % (tag, d))
+                print("%sgh-limit: delete: %s" % (tag, d))
                 if not whatif:
                     d.unlink()
         if with_profile and (pf := profile_path()):
@@ -684,7 +684,7 @@ def install(remove=False, target=None, whatif=False):
         return 0
     real = real_gh()
     if not os.access(real, os.X_OK):
-        print("gh-limit: UYARI: gercek gh bulunamadi (%s); shim yazilmadi" % real)
+        print("gh-limit: WARNING: real gh not found (%s); shim not written" % real)
         return 1
     python = sys.executable if WINDOWS else (shutil.which("python3") or sys.executable)   # Windows: python3 is the Store stub
     script = Path(__file__).resolve()
@@ -693,12 +693,12 @@ def install(remove=False, target=None, whatif=False):
         files.append((ps1, shim_ps1_text(script, real, python), 0o644))
     for path, text, mode in files:
         if path.is_file() and MARKER in path.read_text(errors="replace") and path.read_text() == text.replace("\r\n", "\n"):
-            print("%sgh-limit: ayni: %s" % (tag, path))
+            print("%sgh-limit: same: %s" % (tag, path))
             continue
         if path.exists() and MARKER not in path.read_text(errors="replace"):
-            print("gh-limit: UYARI: %s baska bir dosya, dokunulmadi" % path)
+            print("gh-limit: WARNING: %s is another file, left untouched" % path)
             return 1
-        print("%sgh-limit: yaz: %s (gercek gh: %s)" % (tag, path, real))
+        print("%sgh-limit: write: %s (real gh: %s)" % (tag, path, real))
         if not whatif:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(text.encode("utf-8"))   # bytes: the sh shim must keep LF on Windows
@@ -710,13 +710,13 @@ def install(remove=False, target=None, whatif=False):
         elif pf:
             write_profile(pf, target.parent, False, tag, whatif)
         else:
-            print("gh-limit: not: pwsh profili yazilmadi (pwsh yok veya profil ev dizininin disinda); %s PATH'te gh.exe'den once "
-                  "degilse shim devreye girmez" % target.parent)
+            print("gh-limit: note: pwsh profile not written (no pwsh, or the profile is outside the home directory); the shim only takes effect "
+                  "when %s comes before gh.exe on PATH" % target.parent)
         return 0
     paths = os.environ.get("PATH", "").split(os.pathsep)
     if str(target.parent) not in paths or (os.path.dirname(real) in paths
                                            and paths.index(str(target.parent)) > paths.index(os.path.dirname(real))):
-        print("gh-limit: UYARI: %s PATH'te %s'den once degil; shim devreye girmez" % (target.parent, os.path.dirname(real)))
+        print("gh-limit: WARNING: %s is not before %s on PATH; the shim does not take effect" % (target.parent, os.path.dirname(real)))
     return 0
 
 
@@ -737,26 +737,26 @@ def summary(minutes):
         except OSError:
             pass
     if not lines:
-        print("gh-limit: son %d dakikada kayit yok (%s)" % (minutes, DIR / "log"))
+        print("gh-limit: no records in the last %d minutes (%s)" % (minutes, DIR / "log"))
         return 0
     call = [k for k in lines if not k.get("limited")]
-    min_ = {}
+    per_minute = {}
     for k in lines:
-        min_[int(k["_t"] // 60)] = min_.get(int(k["_t"] // 60), 0) + 1
-    uc, kind = {}, {}
+        per_minute[int(k["_t"] // 60)] = per_minute.get(int(k["_t"] // 60), 0) + 1
+    by_endpoint, kind = {}, {}
     for k in call:
-        uc[k["uc"]] = uc.get(k["uc"], 0) + 1
+        by_endpoint[k["endpoint"]] = by_endpoint.get(k["endpoint"], 0) + 1
         kind[k["kind"]] = kind.get(k["kind"], 0) + 1
     limited = [k for k in lines if k.get("limited")]
     error = [k for k in call if k.get("status") in (403, 429)]
     wait = sorted(k.get("wait", 0) for k in call)
-    print("gh-limit ozeti, son %d dk: %d cagri, %d rate-limit cevabi (yeniden denendi), %d son 403/429, %d ETag 304" % (
+    print("gh-limit summary, last %d min: %d calls, %d rate-limit responses (retried), %d final 403/429, %d ETag 304" % (
         minutes, len(call), len(limited), len(error), sum(1 for k in call if k.get("cache"))))
-    print("  dakika basina: ort %.1f, en cok %d" % (len(lines) / max(minutes, 1), max(min_.values())))
-    print("  sinif: " + ", ".join("%s %d" % x for x in sorted(kind.items(), key=lambda x: -x[1])))
-    print("  bekleme (s): medyan %.2f, en cok %.2f" % (wait[len(wait) // 2], wait[-1]))
-    print("  en cok cagrilan:")
-    for u, n in sorted(uc.items(), key=lambda x: -x[1])[:12]:
+    print("  per minute: avg %.1f, max %d" % (len(lines) / max(minutes, 1), max(per_minute.values())))
+    print("  kind: " + ", ".join("%s %d" % x for x in sorted(kind.items(), key=lambda x: -x[1])))
+    print("  wait (s): median %.2f, max %.2f" % (wait[len(wait) // 2], wait[-1]))
+    print("  most called:")
+    for u, n in sorted(by_endpoint.items(), key=lambda x: -x[1])[:12]:
         print("    %5d  %s" % (n, u))
     return 0
 
@@ -764,8 +764,8 @@ def summary(minutes):
 def main(argv):
     if os.environ.get("GH_LIMIT_SHIM") != "1" and argv[:1] in (["--install"], ["--remove"], ["--summary"]):
         if argv[0] == "--summary":
-            min_ = int(argv[argv.index("--minutes") + 1]) if "--minutes" in argv else 30
-            return summary(min_)
+            per_minute = int(argv[argv.index("--minutes") + 1]) if "--minutes" in argv else 30
+            return summary(per_minute)
         return install(remove=argv[0] == "--remove", whatif="--whatif" in argv)
     return run_cmd(argv)
 
