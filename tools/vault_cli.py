@@ -3,13 +3,13 @@
 
   vault_cli.py run --env [NAME=]mount/path#field [--env ...] [--file [NAME=]mount/path#field] -- <command ...>
       (NAME defaults to the upper-cased field name; works with any command: psql, sqlcmd, mysql, gh, curl, ssh, dotnet)
-  vault_cli.py check mount/path#field [...]     # prints "var (N karakter)" or "missing", never the value
+  vault_cli.py check mount/path#field [...]     # prints "present (N chars)" or "missing", never the value
   vault_cli.py fields mount/path                # prints field NAMES only
   vault_cli.py find <keyword...> [--refresh] [--all]   # FIND credentials: paths, field names, description (never values); all keywords must match
   vault_cli.py write mount/path#field [--clipboard | --stdin | --from-file PATH] [--keep-clipboard] [--not-secret | --short]   # writes a secret read from clipboard/stdin/file, never argv; --stdin/--from-file accept multi-line (PEM); --not-secret allows short non-secret values (ports) and marks the field non-secret; --short allows a short secret by design (PIN/OTP, >= 4 chars) that run still redacts
   vault_cli.py delete mount/path#field             # removes one field (other fields kept)
   vault_cli.py not-secret mount/path#field [--undo]   # declares an existing field non-secret (custom_metadata): run passes it on but does not redact it
-  vault_cli.py migrate-descriptions [--apply]         # one-time: copy description fields into custom_metadata (bul then reads no values)
+  vault_cli.py migrate-descriptions [--apply]         # one-time: copy description fields into custom_metadata (find then reads no values)
 
 Secrets reach the child only as environment variables (or as the path of a 0600 temp file that is
 deleted afterwards). The child's stdout/stderr are streamed with every secret value redacted (exact,
@@ -18,7 +18,7 @@ There is deliberately no subcommand that prints a value.
 
 Auth (same path as the crew-agents operations-sm agent): VAULT_ADDR from the environment, token from VAULT_TOKEN or ~/.vault-token.
 Reads KV v2 (`<mount>/data/<path>`), falling back to KV v1. The mount is the first path segment.
-Writes (yaz/sil) use the same auth (vault_addr/vault_token), KV v2 only, merge with check-and-set.
+Writes (write/delete) use the same auth (vault_addr/vault_token), KV v2 only, merge with check-and-set.
 """
 import argparse
 import hashlib
@@ -78,7 +78,7 @@ def vault_token():
     return t
 
 
-REQUESTS = {}  # Vault requests per kind (list/data/metadata/subkeys/other); printed by bul when VAULT_REQUEST_COUNTER=1
+REQUESTS = {}  # Vault requests per kind (list/data/metadata/subkeys/other); printed by find when VAULT_REQUEST_COUNTER=1
 
 
 def _count(url, method="GET"):
@@ -370,12 +370,12 @@ def cmd_check(args):
             if field in rec:
                 v = rec[field]
                 n = len(v if isinstance(v, str) else json.dumps(v))
-                print(f"{ref}: var ({n} karakter)")
+                print(f"{ref}: present ({n} chars)")
             else:
-                print(f"{ref}: yok")
+                print(f"{ref}: missing")
                 rc = 1
         except VaultError as e:
-            print(f"{ref}: yok ({e})")
+            print(f"{ref}: missing ({e})")
             rc = 1
     return rc
 
@@ -386,7 +386,7 @@ def cmd_fields(args):
     return 0
 
 
-# ---------------------------------------------------------------- bul: find credentials by path / field name / description
+# ---------------------------------------------------------------- find: find credentials by path / field name / description
 # The index is built WITHOUT reading any secret value: recursive LIST for the paths, KV v2 `subkeys` (field names, values
 # come back as null) for the field names, and KV v2 metadata `custom_metadata.description` for the description (only for records that
 # have a description-like field). Nothing is read from `<mount>/data/`. Records whose field names cannot be read that way (KV v1,
@@ -394,17 +394,17 @@ def cmd_fields(args):
 # Cache: ~/.cache/vault/index.json (0600), refreshed after 24 h; a cache from an older index format is rebuilt and overwritten.
 CACHE_TTL = 24 * 3600
 INDEX_VERSION = 2  # 1 (no "v" key) = built from <mount>/data reads; 2 = names/metadata only
-DESC_FIELDS = ("description", "description", "desc", "not", "notes", "note", "comment", "amac", "usage")
-NOT_SECRET_META = "not_secret"  # custom_metadata key: comma-separated field names `run` does not redact (set by not-secret / yaz --not-secret)
-DESC_META = "description"  # custom_metadata key that carries the description (written by yaz / migrate-descriptions)
+DESC_FIELDS = ("description", "desc", "notes", "note", "comment", "purpose", "usage")
+NOT_SECRET_META = "not_secret"  # custom_metadata key: comma-separated field names `run` does not redact (set by not-secret / write --not-secret)
+DESC_META = "description"  # custom_metadata key that carries the description (written by write / migrate-descriptions)
 DESC_MAX = 240
 META_VALUE_MAX = 512  # Vault limit for one custom_metadata value (bytes)
 BUL_WORKERS = 12
 BUL_DEFAULT_LIMIT = 30
-# Never walked, listed or read by bul / migrate-descriptions: config key VAULT_FIND_EXCLUDING (env), comma-separated `<mount>/<path>/` prefixes,
+# Never walked, listed or read by find / migrate-descriptions: config key VAULT_FIND_EXCLUDING (env), comma-separated `<mount>/<path>/` prefixes,
 # default none. Use it for a tier where every request raises an alert (e.g. an offline backup tier); use the full path with
 # fields / check / run there instead.
-def bul_exclude():
+def find_exclude():
     return tuple(e.strip().strip("/") + "/" for e in os.environ.get("VAULT_FIND_EXCLUDING", "").split(",") if e.strip().strip("/"))
 
 
@@ -413,7 +413,7 @@ def cache_file():
 
 
 def fold_tr(text):
-    """Case-insensitive, Turkish-aware form: I/İ/ı/i -> i and ş ğ ü ö ç -> s g u o c, so 'okuma', 'OKUMA' and 'açıklama' all match."""
+    """Case-insensitive, Turkish-aware form: I/İ/ı/i -> i and ş ğ ü ö ç -> s g u o c, so 'LİSANS', 'lisans' and 'LISANS' all match."""
     import unicodedata
     text = text.replace("İ", "i").replace("I", "i").replace("ı", "i")
     text = unicodedata.normalize("NFKD", text.casefold())
@@ -441,7 +441,7 @@ def is_desc_field(name):
 
 def excluded(path):
     p = path.strip("/") + "/"
-    return any(p.startswith(e) for e in bul_exclude())
+    return any(p.startswith(e) for e in find_exclude())
 
 
 def kv_mounts():
@@ -723,7 +723,7 @@ def fill_names(records):
     return changed
 
 
-def cmd_bul(args):
+def cmd_find(args):
     idx, note = load_index(args.refresh)
     if note:
         print(note, file=sys.stderr)
@@ -737,8 +737,8 @@ def cmd_bul(args):
         print(f"    fields: {', '.join(f) or '-'}" if f is not None else "    fields: ? (not readable with this token)")
         if r.get("d"):
             print(f"    {r['d']}")
-    if any(len(w) >= 3 and fold_tr(w) in fold_tr(e) for e in bul_exclude() for w in args.words):
-        print(f"vault find: {', '.join(bul_exclude())} is never indexed (VAULT_FIND_EXCLUDING); use its full path with fields/check/run.",
+    if any(len(w) >= 3 and fold_tr(w) in fold_tr(e) for e in find_exclude() for w in args.words):
+        print(f"vault find: {', '.join(find_exclude())} is never indexed (VAULT_FIND_EXCLUDING); use its full path with fields/check/run.",
               file=sys.stderr)
     if os.environ.get("VAULT_REQUEST_COUNTER") == "1":
         print("vault: Vault requests: " + (", ".join(f"{k}={v}" for k, v in sorted(REQUESTS.items())) or "none (cache)"), file=sys.stderr)
@@ -752,7 +752,7 @@ def cmd_bul(args):
     return 0
 
 
-# ---------------------------------------------------------------- description in custom_metadata (so bul never reads values)
+# ---------------------------------------------------------------- description in custom_metadata (so find never reads values)
 META_KEEP = ("max_versions", "cas_required", "delete_version_after")  # sent back unchanged with every metadata POST
 
 
@@ -822,7 +822,7 @@ def _desc_of(data):
 
 
 def move_cmd_description(args):
-    """One-time migration: copy each record's description field into custom_metadata so bul shows it without reading values.
+    """One-time migration: copy each record's description field into custom_metadata so find shows it without reading values.
     Reads data only of records whose field names (subkeys) contain a description field and whose metadata has none yet."""
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(BUL_WORKERS) as ex:
@@ -852,16 +852,16 @@ def move_cmd_description(args):
                 done += 1
                 print(f"tasindi: {path}")
         except VaultError as e:
-            print(f"atlandi: {path} ({e})", file=sys.stderr)
+            print(f"skipped: {path} ({e})", file=sys.stderr)
     print(f"-- {len(pending)} record(s) without a metadata description" + (f", {done} written" if args.apply else "; run with --apply to write"))
     return 0
 
 
-def cmd_yaz(args):
+def cmd_write(args):
     path, field = parse_ref(args.ref)
     file_ = getattr(args, "from_file", None)
-    use_pano = args.clipboard or (not args.stdin and not file_ and os.name == "nt")
-    if not use_pano and not args.stdin and not file_:
+    use_clipboard = args.clipboard or (not args.stdin and not file_ and os.name == "nt")
+    if not use_clipboard and not args.stdin and not file_:
         raise VaultError("choose --stdin or --from-file PATH (clipboard default is Windows only)")
     if file_:
         try:
@@ -870,19 +870,19 @@ def cmd_yaz(args):
         except (OSError, UnicodeDecodeError) as e:
             raise VaultError(f"cannot read file '{file_}' ({type(e).__name__})")
     else:
-        raw = clipboard_read() if use_pano else sys.stdin.read()
-    value = clean_secret(raw, multiline=not use_pano, not_secret=args.not_secret,
+        raw = clipboard_read() if use_clipboard else sys.stdin.read()
+    value = clean_secret(raw, multiline=not use_clipboard, not_secret=args.not_secret,
                          short_secret=args.short)
     data, ver = _read_v2(path)
     data = dict(data)
     data[field] = value
     newver = write_v2(path, data, ver)
-    if use_pano and not args.keep_clipboard and not clipboard_clear():
+    if use_clipboard and not args.keep_clipboard and not clipboard_clear():
         print("vault: warning: clipboard could not be cleared", file=sys.stderr)
     sha = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
     if len(value) < MIN_WRITE_LEN:  # a hash prefix of a short secret (6-digit code) is trivially brute-forced
-        sha = "hidden (kisa deger)"
-    print(f"yazildi: {path}#{field} ({len(value)} karakter, sha256 {sha}, surum {newver})")
+        sha = "hidden (short value)"
+    print(f"written: {path}#{field} ({len(value)} chars, sha256 {sha}, version {newver})")
     if args.not_secret:
         _declare_not_secret(path, field)
     if is_desc_field(field):
@@ -897,7 +897,7 @@ def _declare_not_secret(path, field):
         print(f"vault: warning: field not marked non-secret ({e}); run will keep masking it", file=sys.stderr)
 
 
-def cmd_hidden_not(args):
+def cmd_not_secret(args):
     """Declare an existing field non-secret (or withdraw it with --undo). Reads field names only, never values."""
     path, field = parse_ref(args.ref)
     try:
@@ -909,27 +909,27 @@ def cmd_hidden_not(args):
     if names is None or field not in names:
         raise VaultError(f"field not found: {path}#{field}")
     changed = set_not_secret(path, field, declared=not args.undo)
-    print(f"{'secret olarak geri alindi' if args.undo else 'hidden degil olarak isaretlendi'}: {path}#{field}"
-          + ("" if changed else " (zaten oyleydi)"))
+    print(f"{'restored as secret' if args.undo else 'marked as not secret'}: {path}#{field}"
+          + ("" if changed else " (already so)"))
     return 0
 
 
 def _mirror_desc(path, desc):
-    """Keep custom_metadata[DESC_META] equal to the record's description field, so bul shows it without reading values."""
+    """Keep custom_metadata[DESC_META] equal to the record's description field, so find shows it without reading values."""
     try:
         set_meta_desc(path, desc)
     except VaultError as e:
-        print(f"vault: warning: description not mirrored to metadata ({e}); bul will not show it", file=sys.stderr)
+        print(f"vault: warning: description not mirrored to metadata ({e}); find will not show it", file=sys.stderr)
 
 
-def cmd_sil(args):
+def cmd_delete(args):
     path, field = parse_ref(args.ref)
     data, ver = _read_v2(path)
     if field not in data:
         raise VaultError(f"field not found: {path}#{field}")
     rest = {k: v for k, v in data.items() if k != field}
     newver = write_v2(path, rest, ver)
-    print(f"silindi: {path}#{field} (surum {newver})")
+    print(f"deleted: {path}#{field} (version {newver})")
     if is_desc_field(field):
         _mirror_desc(path, _desc_of(rest))
     return 0
@@ -952,8 +952,8 @@ def main(argv=None):
     bl.add_argument("--refresh", action="store_true", help="rebuild the local index now (default: when older than 24 h)")
     bl.add_argument("--all", action="store_true", help="show every match (default: first %d)" % BUL_DEFAULT_LIMIT)
     bl.add_argument("--limit", type=int, default=BUL_DEFAULT_LIMIT, metavar="N")
-    bl.set_defaults(fn=cmd_bul)
-    c = sub.add_parser("check", help="print only var (N karakter) / yok per field")
+    bl.set_defaults(fn=cmd_find)
+    c = sub.add_parser("check", help="print only present (N chars) / missing per field")
     c.add_argument("refs", nargs="+", metavar="mount/path#field")
     c.set_defaults(fn=cmd_check)
     f = sub.add_parser("fields", help="list field names of a record")
@@ -972,15 +972,15 @@ def main(argv=None):
     y.add_argument("--short", action="store_true",
                    help="a secret that is short by design (PIN, fixed OTP): allow %d-%d characters; run still redacts it"
                         % (MIN_SECRET_LEN, MIN_WRITE_LEN - 1))
-    y.set_defaults(fn=cmd_yaz)
+    y.set_defaults(fn=cmd_write)
     gd = sub.add_parser("not-secret", help="mark an existing field as non-secret: run passes it on but no longer redacts it")
     gd.add_argument("ref", metavar="mount/path#field")
     gd.add_argument("--undo", action="store_true", help="withdraw the mark (the field is redacted again)")
-    gd.set_defaults(fn=cmd_hidden_not)
+    gd.set_defaults(fn=cmd_not_secret)
     d = sub.add_parser("delete", help="remove one field, other fields kept")
     d.add_argument("ref", metavar="mount/path#field")
-    d.set_defaults(fn=cmd_sil)
-    at = sub.add_parser("migrate-descriptions", help="one-time: copy description fields into custom_metadata so bul never reads values")
+    d.set_defaults(fn=cmd_delete)
+    at = sub.add_parser("migrate-descriptions", help="one-time: copy description fields into custom_metadata so find never reads values")
     at.add_argument("--apply", action="store_true", help="write (default: only list the records that would be migrated)")
     at.set_defaults(fn=move_cmd_description)
     args = ap.parse_args(argv)
