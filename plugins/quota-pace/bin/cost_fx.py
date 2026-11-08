@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 """USD -> TRY rate for the status lines (stdlib only). The ONLY network access of the cost tools.
 
-Source: TCMB (Turkish central bank) daily rates https://www.tcmb.gov.tr/kurlar/today.xml, USD "ForexSelling" (doviz satis).
+Source: TCMB (Turkish central bank) daily rates https://www.tcmb.gov.tr/kurlar/today.xml, USD "ForexSelling" (foreign exchange selling rate).
 TCMB publishes at about 15:30 Istanbul time on working days; weekends and holidays keep the previous day's file.
-Cache: <config dir>/cost/install.json {install, tarih (TCMB date), t (fetched_at), denendi (last attempt)} (0600).
+Cache: <config dir>/cost/fx.json {rate, date (TCMB date), t (fetched_at), tried (last attempt)} (0600).
 
-yenile() is called only from the background refresh (cost_core.refresh_status), never from the status-line render path:
+refresh() is called only from the background refresh (cost_core.refresh_status), never from the status-line render path:
 it fetches when the cached rate is older than the latest 15:30 publication and at most once per hour (a failed attempt counts),
 with a 5 s timeout. A failed fetch keeps the cached rate. Computation everywhere stays in USD; only the displayed value is
-multiplied by this rate (cost.para), so old sums are shown at today's rate.
+multiplied by this rate (cost.money), so old sums are shown at today's rate.
 """
 import json
 import os
@@ -18,16 +18,16 @@ import time
 import urllib.request
 
 CLAUDE = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-FILE = os.path.join(CLAUDE, "cost", "install.json")
+FILE = os.path.join(CLAUDE, "cost", "fx.json")
 URL = "https://www.tcmb.gov.tr/kurlar/today.xml"
-TIME_OVERRUN = 5
-ATTEMPT_BETWEEN = 3600
+TIMEOUT = 5
+ATTEMPT_INTERVAL = 3600
 TR = 3 * 3600          # Turkey is UTC+3 all year (no daylight saving since 2016)
 RELEASE = 15 * 3600 + 30 * 60
 
 _USD = re.compile(r'<Currency\b[^>]*CurrencyCode="USD"[^>]*>(.*?)</Currency>', re.S)
 _SELLING = re.compile(r"<ForexSelling>\s*([0-9]+(?:[.,][0-9]+)?)\s*</ForexSelling>")
-_DATE = re.compile(r'<Date_Date\b[^>]*\bDate="(\d{2})\.(\d{2})\.(\d{4})"')
+_DATE = re.compile(r'<Tarih_Date\b[^>]*\bTarih="(\d{2})\.(\d{2})\.(\d{4})"')   # TCMB's own (Turkish) tag and attribute names
 
 
 def parse(xml):
@@ -36,11 +36,11 @@ def parse(xml):
     s = _SELLING.search(m.group(1)) if m else None
     if not s:
         return None
-    install = float(s.group(1).replace(",", "."))
-    if not 1.0 <= install <= 1000.0:
+    rate = float(s.group(1).replace(",", "."))
+    if not 1.0 <= rate <= 1000.0:
         return None
     t = _DATE.search(xml)
-    return install, ("%s-%s-%s" % (t.group(3), t.group(2), t.group(1)) if t else "")
+    return rate, ("%s-%s-%s" % (t.group(3), t.group(2), t.group(1)) if t else "")
 
 
 def last_release(now):
@@ -63,9 +63,9 @@ def read():
 
 
 def required(d, now):
-    if now - float(d.get("tried") or 0) < ATTEMPT_BETWEEN:
+    if now - float(d.get("tried") or 0) < ATTEMPT_INTERVAL:
         return False
-    return not d.get("install") or float(d.get("t") or 0) < last_release(now)
+    return not d.get("rate") or float(d.get("t") or 0) < last_release(now)
 
 
 def write(d):
@@ -78,7 +78,7 @@ def write(d):
 
 
 def refresh(now=None, fetch=None):
-    """Fetch and cache the rate when due. getir: injectable fetcher (tests) returning the XML text. Never raises."""
+    """Fetch and cache the rate when due. fetch: injectable fetcher (tests) returning the XML text. Never raises."""
     now = time.time() if now is None else now
     d = read()
     if not required(d, now):
@@ -87,13 +87,13 @@ def refresh(now=None, fetch=None):
     try:
         if fetch is None:
             request = urllib.request.Request(URL, headers={"User-Agent": "cost/1"})
-            with urllib.request.urlopen(request, timeout=TIME_OVERRUN) as r:
+            with urllib.request.urlopen(request, timeout=TIMEOUT) as r:
                 xml = r.read(2_000_000).decode("utf-8", "replace")
         else:
             xml = fetch()
         result = parse(xml)
         if result:
-            d.update(install=result[0], date=result[1], t=now)
+            d.update(rate=result[0], date=result[1], t=now)
     except Exception:
         pass
     try:

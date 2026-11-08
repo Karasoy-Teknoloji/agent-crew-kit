@@ -55,17 +55,17 @@ class Gate(unittest.TestCase):
         return {"week_used": used, "week_resets_at": reset or self.RESET, "five_hour_used": None, "five_hour_resets_at": None, **kw}
 
     def test_inside_the_window_with_quota_left_starts(self):
-        self.assertEqual(S.decision(NOW, self.quota(), 5, False, None)[:2], ("start", "pencerede"))
+        self.assertEqual(S.decision(NOW, self.quota(), 5, False, None)[:2], ("start", "in-window"))
 
     def test_before_the_window_after_the_reset_and_unknown_reset_wait(self):
-        self.assertEqual(S.decision(NOW, self.quota(reset=NOW + 6 * H), 5, False, None)[1], "window-oncesi")
-        self.assertEqual(S.decision(NOW, self.quota(reset=NOW - 1), 5, False, None)[1], "reset-sonrasi")
-        self.assertEqual(S.decision(NOW, {"week_resets_at": None}, 5, False, None)[1], "reset-bilinmiyor")
+        self.assertEqual(S.decision(NOW, self.quota(reset=NOW + 6 * H), 5, False, None)[1], "before-window")
+        self.assertEqual(S.decision(NOW, self.quota(reset=NOW - 1), 5, False, None)[1], "after-reset")
+        self.assertEqual(S.decision(NOW, {"week_resets_at": None}, 5, False, None)[1], "reset-unknown")
         self.assertEqual(S.decision(NOW, self.quota(), 0, False, None)[1], "window-missing")     # target hours 0 = no window
 
     def test_window_opens_exactly_at_reset_minus_target(self):
         self.assertEqual(S.decision(NOW, self.quota(reset=NOW + 5 * H), 5, False, None)[0], "start")
-        self.assertEqual(S.decision(NOW - 1, self.quota(reset=NOW + 5 * H), 5, False, None)[1], "window-oncesi")
+        self.assertEqual(S.decision(NOW - 1, self.quota(reset=NOW + 5 * H), 5, False, None)[1], "before-window")
 
     def test_used_up_weekly_limit_and_full_five_hour_window_wait(self):
         self.assertEqual(S.decision(NOW, self.quota(used=100), 5, False, None)[1], "quota-done")
@@ -73,13 +73,13 @@ class Gate(unittest.TestCase):
         self.assertEqual(S.decision(NOW, self.quota(used=None), 5, False, None)[0], "start")   # unknown use: the stream will tell
 
     def test_one_coordinator_and_at_most_one_start_per_15_minutes(self):
-        self.assertEqual(S.decision(NOW, self.quota(), 5, True, None)[1], "calisiyor")
+        self.assertEqual(S.decision(NOW, self.quota(), 5, True, None)[1], "running")
         self.assertEqual(S.decision(NOW, self.quota(), 5, False, NOW - 14 * 60)[1], "retry-interval")
         self.assertEqual(S.decision(NOW, self.quota(), 5, False, NOW - 15 * 60)[0], "start")
 
     def test_no_restart_in_the_last_ten_minutes_and_backoff_after_quick_failures(self):
-        self.assertEqual(S.decision(NOW, self.quota(reset=NOW + 9 * 60), 5, False, NOW - 3600)[1], "reset-yakin")
-        self.assertEqual(S.decision(NOW, self.quota(), 5, False, NOW - 20 * 60, fast_error=3)[1], "error-beklemesi")
+        self.assertEqual(S.decision(NOW, self.quota(reset=NOW + 9 * 60), 5, False, NOW - 3600)[1], "reset-near")
+        self.assertEqual(S.decision(NOW, self.quota(), 5, False, NOW - 20 * 60, fast_error=3)[1], "error-backoff")
         self.assertEqual(S.decision(NOW, self.quota(), 5, False, NOW - 3601, fast_error=3)[0], "start")
 
 
@@ -106,20 +106,20 @@ class Quota(unittest.TestCase):
 
 
 class Lines(unittest.TestCase):
-    def record(self, bas, **kw):
-        k = {"bas": bas, "bit": bas + 600, "week_bas": 93, "week_last": 100, "reason": "limit", "cost": 41.7,
+    def record(self, begin_t, **kw):
+        k = {"begin": begin_t, "end": begin_t + 600, "week_begin": 93, "week_last": 100, "reason": "limit", "cost": 41.7,
              "finished": [("https://github.com/example-org/product-a/issues/61", "x | y"), ("https://example.com/not-github", "z")],
              "resume": [("https://github.com/example-org/product-c/issues/7", "wip")]}
         k.update(kw)
         return k
 
     def test_row_roundtrip_and_links_only_for_issue_or_pr_urls(self):
-        r = S.line_parse(S.install_line(self.record(NOW)))
+        r = S.line_parse(S.build_line(self.record(NOW)))
         self.assertEqual((r["Week %"], r["Reason"], r["Done"], r["WIP"], r["API $"]), ("93→100", "limit", "2", "1", "42"))
         self.assertEqual(r["Items"], "[product-a#61](https://github.com/example-org/product-a/issues/61)")
 
     def test_running_row_is_replaced_by_the_final_one_and_other_rows_stay(self):
-        a = S.person_file("Ali", "", {"bas": NOW, "week_bas": 93, "reason": None, "finished": [], "resume": []})
+        a = S.person_file("Ali", "", {"begin": NOW, "week_begin": 93, "reason": None, "finished": [], "resume": []})
         self.assertIn("running", a)
         b = S.person_file("Ali", a, self.record(NOW + 86400))
         c = S.person_file("Ali", b, self.record(NOW, reason="reset"))
@@ -150,7 +150,7 @@ class Choice(unittest.TestCase):
              {"repo": "O/B", "number": 3, "url": "u3", "title": "t", "state": "closed", "labels": [], "assignees": [], "rank": 0},
              {"repo": "O/C", "number": 9, "url": "u9", "title": "t", "state": "open", "labels": [], "assignees": [], "rank": 99},
              {"repo": "O/C", "number": 4, "url": "u4", "title": "t", "state": "open", "labels": [], "assignees": [], "rank": 1}]
-        b = S.sec_b("me", o, excluded={"u4"})
+        b = S.pick_b("me", o, excluded={"u4"})
         self.assertEqual([i["number"] for i in b], [2, 5, 9])
         self.assertEqual(b[0]["repo"], "B")
 
@@ -209,7 +209,7 @@ class Sessions(unittest.TestCase):
         pid = pid or self.live.pid
         jwr(os.path.join(S.CLAUDE, "sessions", "%d-%d.json" % (pid, self.n)), session_json(pid, name, sid, cwd, started, status, entry))
         if model:
-            path = S.transkript_path(cwd, sid)
+            path = S.transcript_path(cwd, sid)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 f.write("garbage line\n" + assistant("claude-haiku-4-5", "x") + assistant(model, "y"))   # the LAST assistant entry decides
@@ -228,7 +228,7 @@ class Sessions(unittest.TestCase):
         self.assertEqual(S.model_score(None), (-1, ()))
 
     def test_transcript_path_and_last_model(self):
-        self.assertEqual(S.transkript_path("/home/u/a.b", "ID"), os.path.join(S.CLAUDE, "projects", "-home-u-a-b", "ID.jsonl"))
+        self.assertEqual(S.transcript_path("/home/u/a.b", "ID"), os.path.join(S.CLAUDE, "projects", "-home-u-a-b", "ID.jsonl"))
         self.add("A", "claude-sonnet-5-5", 100)
         self.assertEqual(S.read_sessions()[0]["model"], "claude-sonnet-5-5")
 
@@ -282,7 +282,7 @@ class Sessions(unittest.TestCase):
     def test_a_lock_is_live_for_the_whole_longest_window(self):
         os.makedirs(S.DIR, exist_ok=True)
         old = S.LOCK
-        S.LOCK = os.path.join(S.DIR, "koordinator.lock")
+        S.LOCK = os.path.join(S.DIR, "coordinator.lock")
         try:
             jwr(S.LOCK, {"pid": self.live.pid, "t": NOW - 50 * H})       # a window run, 50 h in (the cap is 72 h by default, 96 h at most: stale only after 97 h)
             self.assertTrue(S.lock_live(NOW))
@@ -305,33 +305,33 @@ class Sessions(unittest.TestCase):
 
 FAKE_ROLE = r'''
 import json, os, re, subprocess, sys, time
-girdi = sys.stdin.read()
-m = re.search(r"<ileti>\n(.*)\n</ileti>", girdi, re.S)
-ad = re.search(r"whose name is exactly '([^']*)'", girdi).group(1)
-isaret = os.environ["FAKE_MARK"]
-onceki = sum(1 for _ in open(isaret)) if os.path.exists(isaret) else 0
-open(isaret, "a").write(json.dumps({"to": ad, "text": m.group(1)}) + "\n")
-sira = [x for x in os.environ.get("FAKE_ORDER", "").split(",") if x]     # one mode per relay call; the last one repeats
-mod = sira[min(onceki, len(sira) - 1)] if sira else os.environ.get("FAKE_MODE", "ok")
-yol = os.environ.get("FAKE_TRANSCRIPT")
-satir = json.dumps({"type": "user", "message": "<cross-session-message from=x>" + m.group(1) + "</cross-session-message>"}) + "\n"
-satir += json.dumps({"type": "assistant", "message": {"id": "r%d" % os.getpid(), "model": "claude-opus-5-5"}}) + "\n"
-target_ok = yol and ad == os.environ.get("FAKE_AD", ad)
+inp = sys.stdin.read()
+m = re.search(r"<message>\n(.*)\n</message>", inp, re.S)
+name = re.search(r"whose name is exactly '([^']*)'", inp).group(1)
+mark = os.environ["FAKE_MARK"]
+before = sum(1 for _ in open(mark)) if os.path.exists(mark) else 0
+open(mark, "a").write(json.dumps({"to": name, "text": m.group(1)}) + "\n")
+order = [x for x in os.environ.get("FAKE_ORDER", "").split(",") if x]     # one mode per relay call; the last one repeats
+mod = order[min(before, len(order) - 1)] if order else os.environ.get("FAKE_MODE", "ok")
+path = os.environ.get("FAKE_TRANSCRIPT")
+line = json.dumps({"type": "user", "message": "<cross-session-message from=x>" + m.group(1) + "</cross-session-message>"}) + "\n"
+line += json.dumps({"type": "assistant", "message": {"id": "r%d" % os.getpid(), "model": "claude-opus-5-5"}}) + "\n"
+target_ok = path and name == os.environ.get("FAKE_NAME", name)
 if mod == "time":                       # the relay hangs past its timeout
     time.sleep(60)
-elif mod == "bos":                       # exits cleanly without an answer word
+elif mod == "silent":                    # exits cleanly without an answer word
     print("I could not decide.")
 elif mod == "error":                      # an error, no answer word
     print("API Error: 500", file=sys.stderr)
     sys.exit(1)
-elif mod in ("ok", "late", "isaretsiz") and target_ok:
+elif mod in ("ok", "late", "unmarked") and target_ok:
     if mod == "ok":
-        with open(yol, "a") as f:
-            f.write(satir)
+        with open(path, "a") as f:
+            f.write(line)
     elif mod == "late":                   # a busy target: the message shows up only at the end of its turn
         subprocess.Popen([sys.executable, "-c", "import sys, time; time.sleep(float(sys.argv[1])); open(sys.argv[2], 'a').write(sys.argv[3])",
-                          os.environ.get("FAKE_DELAY", "3"), yol, satir], start_new_session=True)
-    print("**TESLIM**" if os.environ.get("FAKE_MARKDOWN") else "HANDOFF")
+                          os.environ.get("FAKE_DELAY", "3"), path, line], start_new_session=True)
+    print("**HANDOFF**" if os.environ.get("FAKE_MARKDOWN") else "HANDOFF")
 else:
     print("MISSING")
 '''
@@ -339,52 +339,52 @@ else:
 FAKE_TMUX = r'''
 import json, os, sys
 a = sys.argv[1:]
-soket = None
+sock = None
 if a[:1] == ["-L"]:
-    soket, a = a[1], a[2:]
-durum = os.environ["FAKE_TMUX_STATE"]
-os.makedirs(durum, exist_ok=True)
-open(os.path.join(durum, "log"), "a").write(json.dumps({"L": soket, "a": a}) + "\n")
-def ad():
+    sock, a = a[1], a[2:]
+state = os.environ["FAKE_TMUX_STATE"]
+os.makedirs(state, exist_ok=True)
+open(os.path.join(state, "log"), "a").write(json.dumps({"L": sock, "a": a}) + "\n")
+def name():
     return a[a.index("-t") + 1].lstrip("=").rstrip(":") if "-t" in a else a[a.index("-s") + 1]
-def dosya(n):
-    return os.path.join(durum, n)
-def kaydet():
+def fpath(n):
+    return os.path.join(state, n)
+def register():
     # the started claude registers itself (FAKE_TMUX_RECORD = "<sessions dir>:<live pid>"), unless FAKE_TMUX_UNREGISTERED=1
-    kayit = os.environ.get("FAKE_TMUX_RECORD")
-    if not kayit or os.environ.get("FAKE_TMUX_UNREGISTERED") == "1":
+    reg = os.environ.get("FAKE_TMUX_RECORD")
+    if not reg or os.environ.get("FAKE_TMUX_UNREGISTERED") == "1":
         return
-    d, pid = kayit.rsplit(":", 1)
-    k = json.load(open(dosya("session")))
+    d, pid = reg.rsplit(":", 1)
+    k = json.load(open(fpath("session")))
     json.dump({"pid": int(pid), "sessionId": k["sid"], "cwd": k["cwd"], "startedAt": 0, "kind": "interactive", "entrypoint": "cli",
                "name": k["name"], "status": "busy"}, open(os.path.join(d, "%s.json" % pid), "w"))
-ekran = os.environ.get("FAKE_TMUX_SCREEN")       # a dialog on screen (capture-pane); the trust dialog moves with Down, closes with Enter
+screen = os.environ.get("FAKE_TMUX_SCREEN")       # a dialog on screen (capture-pane); the trust dialog moves with Down, closes with Enter
 if a[0] == "new-session":
-    open(dosya("s-" + ad()), "w").write(a[-1])
+    open(fpath("s-" + name()), "w").write(a[-1])
     k = a[-1].split()
-    json.dump({"name": ad(), "cwd": a[a.index("-c") + 1], "sid": k[k.index("--session-id") + 1]}, open(dosya("session"), "w"))
-    if not ekran:
-        kaydet()
+    json.dump({"name": name(), "cwd": a[a.index("-c") + 1], "sid": k[k.index("--session-id") + 1]}, open(fpath("session"), "w"))
+    if not screen:
+        register()
 elif a[0] == "has-session":
-    sys.exit(0 if os.path.exists(dosya("s-" + ad())) else 1)
+    sys.exit(0 if os.path.exists(fpath("s-" + name())) else 1)
 elif a[0] == "kill-session":
-    try: os.remove(dosya("s-" + ad()))
+    try: os.remove(fpath("s-" + name()))
     except OSError: pass
-    kayit = os.environ.get("FAKE_TMUX_RECORD")
-    if kayit:
-        try: os.remove(os.path.join(kayit.rsplit(":", 1)[0], "%s.json" % kayit.rsplit(":", 1)[1]))
+    reg = os.environ.get("FAKE_TMUX_RECORD")
+    if reg:
+        try: os.remove(os.path.join(reg.rsplit(":", 1)[0], "%s.json" % reg.rsplit(":", 1)[1]))
         except OSError: pass
-elif a[0] == "send-keys" and ekran and not os.path.exists(dosya("kapandi")):
+elif a[0] == "send-keys" and screen and not os.path.exists(fpath("closed")):
     if a[-1] == "Down":
-        open(dosya("asagi"), "w").close()
-    elif a[-1] == "Enter" and os.path.exists(dosya("asagi")) and "I trust this folder" in open(ekran, encoding="utf-8").read():
-        open(dosya("kapandi"), "w").close()
-        kaydet()
-elif a[0] == "capture-pane" and ekran and not os.path.exists(dosya("kapandi")):
-    metin = open(ekran, encoding="utf-8").read()
-    if os.path.exists(dosya("asagi")):
-        metin = metin.replace(" ❯ No, exit", "   No, exit").replace("   Yes, I trust", " ❯ Yes, I trust")
-    sys.stdout.write(metin)
+        open(fpath("down"), "w").close()
+    elif a[-1] == "Enter" and os.path.exists(fpath("down")) and "I trust this folder" in open(screen, encoding="utf-8").read():
+        open(fpath("closed"), "w").close()
+        register()
+elif a[0] == "capture-pane" and screen and not os.path.exists(fpath("closed")):
+    text = open(screen, encoding="utf-8").read()
+    if os.path.exists(fpath("down")):
+        text = text.replace(" ❯ No, exit", "   No, exit").replace("   Yes, I trust", " ❯ Yes, I trust")
+    sys.stdout.write(text)
 '''
 
 
@@ -395,7 +395,7 @@ def tmux_calls(status):
 
 @unittest.skipUnless(shutil.which("git") and os.name != "nt", "needs git and a POSIX shell (the fakes are executable scripts)")
 class Working(unittest.TestCase):
-    """last_window.py trigger / durum end to end under a scratch HOME."""
+    """last_window.py trigger / status end to end under a scratch HOME."""
 
     @classmethod
     def setUpClass(cls):
@@ -436,8 +436,8 @@ class Working(unittest.TestCase):
         git("clone", "-q", "--bare", self.seed, self.remote)
         self.live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
         self.addCleanup(lambda: (self.live.kill(), self.live.wait()))
-        self.canli2 = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])   # the pid the fallback claude registers with
-        self.addCleanup(lambda: (self.canli2.kill(), self.canli2.wait()))
+        self.live2 = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])   # the pid the fallback claude registers with
+        self.addCleanup(lambda: (self.live2.kill(), self.live2.wait()))
 
     def pace(self, reset_in, used=93, **kw):
         d = {"week_used": used, "week_resets_at": int(time.time() + reset_in), "updated": int(time.time()), "target_hours": 5}
@@ -462,9 +462,9 @@ class Working(unittest.TestCase):
                                                                  "LAST_WINDOW", "LAST_WINDOW_GH_LOGIN")}
         env.update(HOME=self.home, USERPROFILE=self.home, CLAUDE_CONFIG_DIR=self.claude, LAST_WINDOW_CLAUDE=self.fake, LAST_WINDOW_TMUX=self.tmux,
                    LAST_WINDOW_CHOICE=self.choice, LAST_WINDOW_POLL="0.2", LAST_WINDOW_ACK_SEC="5", LAST_WINDOW_STOP_SEC="1", LAST_WINDOW_RECORD_SEC="5",
-                   FAKE_TMUX_RECORD="%s:%d" % (os.path.join(self.claude, "sessions"), self.canli2.pid), FAKE_MODE=mode, FAKE_MARK=self.mark,
+                   FAKE_TMUX_RECORD="%s:%d" % (os.path.join(self.claude, "sessions"), self.live2.pid), FAKE_MODE=mode, FAKE_MARK=self.mark,
                    FAKE_TMUX_STATE=self.tstate, CLAUDE_SHARED_REMOTE=self.remote, CLAUDE_SHARED_LAST_WINDOW_CLONE=self.clone, CLAUDE_SHARED_PERSON="Emre",
-                   CLAUDE_SHARED_KOK=self.home, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@x",
+                   CLAUDE_SHARED_ROOT=self.home, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@x",
                    GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@x")
         env.update(extra)
         return env
@@ -505,20 +505,20 @@ class Working(unittest.TestCase):
         self.assertIn("product-a/issues/61", b)                         # the pick is in the brief
         self.assertNotIn("{{", b)                                      # every placeholder was filled
         self.assertIn("EXCLUDED", b)
-        self.assertIn("başladı", b)
+        self.assertIn("started", b)
         self.assertIn("go idle (do not exit", b)                       # an assigned session is the owner's: never told to exit
         rows = S.file_lines(self.shared())
         self.assertEqual(len(rows), 1)                                 # the "running" row was replaced, not duplicated
         self.assertEqual(rows[0]["Reason"], "reset")
         self.assertIn("session:Alpha", rows[0]["Items"])
-        self.assertFalse(os.path.exists(os.path.join(self.claude, "last-window", "koordinator.lock")))
+        self.assertFalse(os.path.exists(os.path.join(self.claude, "last-window", "coordinator.lock")))
 
     def test_a_candidate_that_cannot_be_reached_falls_back_to_the_visible_session(self):
         path = self.session("Alpha")
         self.pace(8)
-        r = self.run_sp("trigger", PACE_TARGET_HOURS="5", FAKE_TRANSCRIPT=path, FAKE_AD="Nobody", LAST_WINDOW_ACK_SEC="1")   # the fake relay delivers only to 'Nobody'
+        r = self.run_sp("trigger", PACE_TARGET_HOURS="5", FAKE_TRANSCRIPT=path, FAKE_NAME="Nobody", LAST_WINDOW_ACK_SEC="1")   # the fake relay delivers only to 'Nobody'
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        # the fake answers YOK for Alpha: no candidate took it -> the visible fallback session was started instead
+        # the fake answers MISSING for Alpha: no candidate took it -> the visible fallback session was started instead
         log = rd(os.path.join(self.tstate, "log"))
         self.assertIn("new-session", log)
         self.assertIn("last-window-emre", log)
@@ -550,7 +550,7 @@ class Working(unittest.TestCase):
     def test_outside_the_window_or_with_the_limit_used_nothing_starts(self):
         self.session()
         self.pace(8 * H)
-        self.assertIn("window-oncesi", self.run_sp("trigger").stdout)
+        self.assertIn("before-window", self.run_sp("trigger").stdout)
         self.pace(3 * H, used=100)
         self.assertIn("quota-done", self.run_sp("trigger").stdout)
         self.assertEqual(self.sent(), [])
@@ -567,7 +567,7 @@ class Working(unittest.TestCase):
         self.assertIn("DRY RUN: would send the assignment to 'Alpha'", r.stdout)
         self.assertEqual(self.sent(), [])
         self.assertFalse(os.path.exists(self.tstate))
-        self.assertFalse(os.path.exists(os.path.join(self.claude, "last-window", "koordinator.lock")))
+        self.assertFalse(os.path.exists(os.path.join(self.claude, "last-window", "coordinator.lock")))
         self.assertEqual(self.shared(), "")
         r = self.run_sp("session")
         self.assertIn("Assignment goes to: Alpha", r.stdout)
@@ -595,16 +595,16 @@ class Working(unittest.TestCase):
                 p.kill()
         self.assertEqual(p.returncode, 0)
         self.assertEqual(S.file_lines(self.shared())[0]["Reason"], "stopped")
-        self.assertFalse(os.path.exists(os.path.join(self.claude, "last-window", "koordinator.lock")))
+        self.assertFalse(os.path.exists(os.path.join(self.claude, "last-window", "coordinator.lock")))
         self.assertEqual(len(self.sent()), 1)                          # no stop message, the owner's session keeps working
         self.assertEqual(self.live.poll(), None)
 
     def test_a_live_lock_blocks_and_a_dead_one_is_taken_over(self):
         self.pace(3 * H)
         os.makedirs(os.path.join(self.claude, "last-window"))
-        lock = os.path.join(self.claude, "last-window", "koordinator.lock")
+        lock = os.path.join(self.claude, "last-window", "coordinator.lock")
         jwr(lock, {"pid": os.getpid(), "t": int(time.time())})   # this test process is alive
-        self.assertIn("calisiyor", self.run_sp("trigger").stdout)
+        self.assertIn("running", self.run_sp("trigger").stdout)
         self.assertFalse(os.path.exists(self.tstate))
         p = subprocess.Popen([sys.executable, "-c", "pass"])
         p.wait()
@@ -616,7 +616,7 @@ class Working(unittest.TestCase):
     def test_status_shows_the_session_of_a_running_assignment(self):
         self.pace(3 * H)
         os.makedirs(os.path.join(self.claude, "last-window"))
-        jwr(os.path.join(self.claude, "last-window", "koordinator.lock"), {"pid": os.getpid(), "t": int(time.time()), "session": "Alpha", "mod": "assignment"})
+        jwr(os.path.join(self.claude, "last-window", "coordinator.lock"), {"pid": os.getpid(), "t": int(time.time()), "session": "Alpha", "via": "assignment"})
         self.assertIn("running now in session 'Alpha' (assigned live session)", self.run_sp("status", "--local").stdout)
 
     def test_the_fallback_test_never_relays_to_a_live_session(self):
@@ -626,7 +626,7 @@ class Working(unittest.TestCase):
         self.assertEqual(self.sent(), [])                              # nothing was relayed to Alpha
         self.assertIn("new-session", rd(os.path.join(self.tstate, "log")))
         self.assertIn("reason=reset session=last-window-test mode=tmux", r.stdout)
-        self.assertFalse(os.path.exists(os.path.join(self.claude, "last-window", "koordinator.lock")))   # scratch state only
+        self.assertFalse(os.path.exists(os.path.join(self.claude, "last-window", "coordinator.lock")))   # scratch state only
         self.assertEqual(self.shared(), "")                            # no shared-log row
 
     def log(self):
@@ -666,9 +666,9 @@ class Working(unittest.TestCase):
         env.pop("LAST_WINDOW_DIR", None)
         r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, env=env, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("window-oncesi", self.log())              # the tick ran and logged its decision
+        self.assertIn("before-window", self.log())              # the tick ran and logged its decision
 
-    # ---- resume alarm (devam) and burn mode (bitir)
+    # ---- resume alarm and burn mode
     def halt(self, path, t, text="You've hit your session limit · resets 6:30pm (Europe/Istanbul)", uuid="dur-1"):
         """Append the synthetic 429 entry Claude Code writes when the limit stops a session (shape copied from a real transcript)."""
         with open(path, "a", encoding="utf-8") as f:
@@ -692,14 +692,14 @@ class Working(unittest.TestCase):
         r = self.run_sp("trigger", "--modes", "resume")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual([g["to"] for g in self.sent()], ["Alpha"])
-        self.assertIn("Devam alarmi", self.sent()[0]["text"])
+        self.assertIn("resume alarm", self.sent()[0]["text"])
         self.assertIn("pick nothing new", self.sent()[0]["text"])                  # normal mode: only already-started work
         r = self.run_sp("trigger", "--modes", "resume")                                 # the next tick: the same reset is not woken twice
         self.assertIn("resume-missing", r.stdout)
         self.assertEqual(len(self.sent()), 1)
         self.assertFalse(os.path.exists(self.tstate))                               # no new session is ever started for a resume
-        dvs = jrd(os.path.join(self.claude, "last-window", "resume.json"))
-        self.assertEqual((dvs["key"], dvs["warned"]), (int(now - 11 * 60), ["dur-1"]))
+        res_state = jrd(os.path.join(self.claude, "last-window", "resume.json"))
+        self.assertEqual((res_state["key"], res_state["warned"]), (int(now - 11 * 60), ["dur-1"]))
 
     def test_resume_alarm_after_the_new_window_shows_and_while_a_coordinator_runs(self):
         # review finding: auto-continued sessions already write the NEW window (5 h at 3%) before the alarm's grace is over, and a
@@ -709,11 +709,11 @@ class Working(unittest.TestCase):
         self.halt(path, now - 4 * H)                                               # stopped in the previous window
         self.pace(3 * 86400, used=60, five_hour_used=3, five_hour_resets_at=int(now + 4 * H))   # new window started 1 h ago
         os.makedirs(os.path.join(self.claude, "last-window"), exist_ok=True)
-        jwr(os.path.join(self.claude, "last-window", "koordinator.lock"), {"pid": self.live.pid, "t": int(now)})   # a live run
+        jwr(os.path.join(self.claude, "last-window", "coordinator.lock"), {"pid": self.live.pid, "t": int(now)})   # a live run
         r = self.run_sp("trigger", "--modes", "resume")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual([g["to"] for g in self.sent()], ["Alpha"])
-        self.assertTrue(os.path.exists(os.path.join(self.claude, "last-window", "koordinator.lock")))   # the run's lock is left alone
+        self.assertTrue(os.path.exists(os.path.join(self.claude, "last-window", "coordinator.lock")))   # the run's lock is left alone
         self.assertFalse(os.path.exists(os.path.join(self.claude, "last-window", "resume.lock")))
         r = self.run_sp("burn", "--on", LAST_WINDOW_GH_LOGIN="example-dev-2")              # no switching on while a run is live
         self.assertEqual(r.returncode, 3, r.stdout)
@@ -737,7 +737,7 @@ class Working(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual([g["to"] for g in self.sent()], ["Alpha"])
         rows = S.file_lines(self.shared())
-        self.assertEqual((rows[0]["Reason"], "session:Alpha" in rows[0]["Items"]), ("devam/uyandirma", True))
+        self.assertEqual((rows[0]["Reason"], "session:Alpha" in rows[0]["Items"]), ("resume/wake", True))
         self.halt(path, time.time() - 5 * H - 15 * 60, uuid="dur-1")                  # the same stop seen again: never a second relay
         self.run_sp("trigger", "--modes", "resume")
         self.assertEqual(len(self.sent()), 1)
@@ -757,34 +757,34 @@ class Working(unittest.TestCase):
         self.assertEqual(self.sent(), [])
         os.remove(os.path.join(self.claude, "last-window", "resume.json"))
         self.halt(path, now - H, uuid="dur-3")
-        r = self.run_sp("trigger")                                                       # a last-window-only timer (no --modes devam)
+        r = self.run_sp("trigger")                                                       # a last-window-only timer (no --modes resume)
         self.assertIn("resume alarm: not installed", r.stdout)
         self.assertEqual(self.sent(), [])
 
     def test_burn_mode_is_switched_on_and_off_only_by_a_developer(self):
         self.pace(3 * 86400)
-        r = self.run_sp("burn", "--on", LAST_WINDOW_GH_LOGIN="example-tester-1")          # a tester (rol: testci)
+        r = self.run_sp("burn", "--on", LAST_WINDOW_GH_LOGIN="example-tester-1")          # a tester (role: tester)
         self.assertEqual(r.returncode, 3, r.stdout)
-        self.assertIn("Reddedildi", r.stdout)
+        self.assertIn("Refused", r.stdout)
         self.assertIsNone(self.read_burn())
-        self.assertEqual(self.run_sp("burn", "--on", LAST_WINDOW_GH_LOGIN="kimseyok").returncode, 3)   # not in kisiler.json
+        self.assertEqual(self.run_sp("burn", "--on", LAST_WINDOW_GH_LOGIN="nobody-here").returncode, 3)   # not in people.json
         r = self.run_sp("burn", "--on", LAST_WINDOW_GH_LOGIN="example-dev-2", LAST_WINDOW="1")              # from inside a last-window session
         self.assertEqual(r.returncode, 3, r.stdout)
         self.assertIsNone(self.read_burn())
         r = self.run_sp("burn", "--on", LAST_WINDOW_GH_LOGIN="example-dev-2")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("Token bitirme modu AÇIK", r.stdout)
+        self.assertIn("Burn mode ON", r.stdout)
         b = self.read_burn()
         self.assertEqual((b["active"], b["opener"], b["opener_login"]), (True, "Onur Demir", "example-dev-2"))
         self.assertEqual(b["week_reset"], jrd(os.path.join(self.claude, "pace.json"))["week_resets_at"])   # auto-off at THIS weekly reset
-        self.assertIn("AÇIK", self.run_sp("burn", "status").stdout)
+        self.assertIn("Burn mode ON", self.run_sp("burn", "status").stdout)
         self.assertEqual(self.run_sp("burn", "--off", LAST_WINDOW_GH_LOGIN="example-tester-1").returncode, 3)
         self.assertTrue(self.read_burn()["active"])
         r = self.run_sp("burn", "--off", LAST_WINDOW_GH_LOGIN="example-dev-1")      # another developer may switch it off
         self.assertEqual(r.returncode, 0, r.stdout)
         b = self.read_burn()
         self.assertEqual((b["active"], b["closer"]), (False, "Emre"))
-        self.assertIn("CLOSED", self.run_sp("burn").stdout)
+        self.assertIn("Burn mode OFF", self.run_sp("burn").stdout)
 
     def test_burn_mode_needs_a_known_weekly_reset_and_quota_left(self):
         self.assertEqual(self.run_sp("burn", "--on", LAST_WINDOW_GH_LOGIN="example-dev-2").returncode, 2)   # no pace.json
@@ -802,8 +802,8 @@ class Working(unittest.TestCase):
         self.assertIn("quota-done", self.run_sp("trigger", "--dry-run").stdout)
         self.pace(3 * 86400, used=50)
         os.makedirs(os.path.join(self.claude, "last-window"), exist_ok=True)
-        jwr(os.path.join(self.claude, "last-window", "status.json"), {"wait_bos": int(time.time() + 600)})
-        self.assertIn("bos-waiting", self.run_sp("trigger", "--dry-run").stdout)
+        jwr(os.path.join(self.claude, "last-window", "status.json"), {"wait_idle": int(time.time() + 600)})
+        self.assertIn("idle-wait", self.run_sp("trigger", "--dry-run").stdout)
 
     def test_burn_mode_run_outside_the_window_ends_at_the_weekly_reset_and_switches_itself_off(self):
         path = self.session("Alpha")
@@ -819,14 +819,14 @@ class Working(unittest.TestCase):
         b = self.brief()
         self.assertIn("switched on burn mode", b)
         self.assertNotIn("{{", b)
-        self.assertNotIn("kip:", b)                                                    # the mode blocks are resolved
+        self.assertNotIn("mode:", b)                                                    # the mode blocks are resolved
         self.assertIn("switching burn mode on or off", b)                              # the never-list covers the switch itself
         rows = S.file_lines(self.shared())
-        self.assertEqual(rows[0]["Reason"], "bitir/reset")
+        self.assertEqual(rows[0]["Reason"], "burn/reset")
         r = self.run_sp("trigger", PACE_TARGET_HOURS="0")                                  # the next tick, after the weekly reset
         self.assertIn("burn mode: off", r.stdout)
         b = self.read_burn()
-        self.assertEqual((b["active"], b["closer"]), (False, "otomatik (haftalik sifirlanma)"))
+        self.assertEqual((b["active"], b["closer"]), (False, "automatic (weekly reset)"))
 
     def test_switching_burn_mode_off_ends_the_running_assignment(self):
         path = self.session("Alpha")
@@ -845,11 +845,11 @@ class Working(unittest.TestCase):
         out, err = p.communicate(timeout=90)
         self.assertEqual(p.returncode, 0, out + err)
         self.assertIn("was switched off", self.sent()[1]["text"])
-        self.assertEqual(S.file_lines(self.shared())[0]["Reason"], "bitir/burn-kapandi")
+        self.assertEqual(S.file_lines(self.shared())[0]["Reason"], "burn/burn-off")
 
 
 class StageBase(unittest.TestCase):
-    """calistir() in-process with a fake clock: live sessions are registry files of this test process's own pid, the relay (S.forward) is
+    """run_cmd() in-process with a fake clock: live sessions are registry files of this test process's own pid, the relay (S.forward) is
     scripted, sleeping advances the clock and fires scheduled events (a late message, a status change). Nothing real is started."""
     RESET_IN = 1200
 
@@ -862,10 +862,10 @@ class StageBase(unittest.TestCase):
         os.makedirs(os.path.join(claude, "sessions"))
         self.t, self.events, self.sent, self.behavior, self.sessions = float(NOW), [], [], [], {}
         self.launched = []
-        for name, v in (("CLAUDE", claude), ("DIR", dir_), ("LOCK", os.path.join(dir_, "koordinator.lock")),
+        for name, v in (("CLAUDE", claude), ("DIR", dir_), ("LOCK", os.path.join(dir_, "coordinator.lock")),
                       ("STATUS", os.path.join(dir_, "status.json")), ("TIME", lambda: self.t), ("forward", self.role),
-                      ("install_prompt", lambda *a, **k: "brief"), ("_person", lambda: "Tester"), ("machine_name", lambda: "m"),
-                      ("window_name", lambda: "last-window-tester"), ("kok_dir", lambda: self.root), ("TmuxSession", self.fake_session_kind()),
+                      ("build_prompt", lambda *a, **k: "brief"), ("_person", lambda: "Tester"), ("machine_name", lambda: "m"),
+                      ("window_name", lambda: "last-window-tester"), ("repos_root", lambda: self.root), ("TmuxSession", self.fake_session_kind()),
                       ("TabSession", self.fake_session_kind())):
             p = mock.patch.object(S, name, v)
             p.start()
@@ -880,19 +880,19 @@ class StageBase(unittest.TestCase):
             os.environ.pop(k, None)
 
     # --- the scene
-    def sleep(self, sec_):
-        self.t += max(float(sec_), 0.01)
+    def sleep(self, secs):
+        self.t += max(float(secs), 0.01)
         for event in [o for o in self.events if o[0] <= self.t]:
             self.events.remove(event)
             event[1]()
 
-    def after(self, sec_, f):
-        self.events.append((self.t + sec_, f))
+    def after(self, secs, f):
+        self.events.append((self.t + secs, f))
 
     def session(self, name, status="busy", model="claude-opus-5-5"):
         sid = "22222222-2222-2222-2222-%012d" % (len(self.sessions) + 1)
         cwd = "/home/u/" + name
-        path = S.transkript_path(cwd, sid)
+        path = S.transcript_path(cwd, sid)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(assistant(model, "old-" + name))
@@ -938,10 +938,10 @@ class StageBase(unittest.TestCase):
                 self.stopped = 0
                 test.launched.append(self)
 
-            def start(self, kom, env):
-                self.kom = kom
+            def start(self, command, env):
+                self.command = command
 
-            def wait_record(self, sec_=None):
+            def wait_record(self, secs=None):
                 if Fake.error:
                     raise Fake.error
                 return True
@@ -964,7 +964,7 @@ class StageBase(unittest.TestCase):
 
 
 class Stage(StageBase):
-    # --- finding 1: a relay's TESLIM binds the run to that session
+    # --- finding 1: a relay's HANDOFF binds the run to that session
     def test_handoff_with_the_message_showing_late_stays_with_that_session_no_second_delivery(self):
         self.session("Alpha", "busy")
         self.session("Beta", "idle")
@@ -974,7 +974,7 @@ class Stage(StageBase):
         k = self.run_cmd()
         self.assertEqual([a for a, _ in self.sent], ["Alpha", "Alpha"])   # the assignment once, then "reset reached"
         self.assertIn("Reset reached", self.sent[1][1])
-        self.assertEqual((k["reason"], k["session"], k["mod"]), ("reset", "Alpha", "assignment"))
+        self.assertEqual((k["reason"], k["session"], k["via"]), ("reset", "Alpha", "assignment"))
         self.assertEqual(k["turn"], 1)                          # only the turn after the marker counts
         self.assertEqual(self.launched, [])                  # no fallback session
         self.assertRegex(self.log(), r"shows the assignment, 9\d\d s")
@@ -982,10 +982,10 @@ class Stage(StageBase):
     def test_handoff_without_the_message_on_an_idle_session_gives_up_without_a_second_delivery(self):
         self.session("Alpha", "idle")
         self.session("Beta", "idle")
-        self.behavior = [("handoff", None, 0)]                 # the relay says TESLIM, the message never shows up
+        self.behavior = [("handoff", None, 0)]                 # the relay says HANDOFF, the message never shows up
         k = self.run_cmd()
         self.assertEqual([a for a, _ in self.sent], ["Alpha"])
-        self.assertEqual(k["reason"], "handoff-gorulmedi")
+        self.assertEqual(k["reason"], "handoff-unseen")
         self.assertEqual(self.launched, [])
 
     def test_handoff_without_the_message_on_a_busy_session_follows_it_to_the_reset(self):
@@ -1005,14 +1005,14 @@ class Stage(StageBase):
         self.assertEqual((k["reason"], k["exit"]), ("handoff-unknown", 1))
         self.assertEqual(self.launched, [])
 
-    def test_a_clear_yok_or_a_relay_error_moves_on_and_then_to_the_fallback(self):
+    def test_a_clear_missing_or_a_relay_error_moves_on_and_then_to_the_fallback(self):
         self.session("Alpha", "idle")
         self.session("Beta", "idle")
         self.behavior = [("missing", None, 0), ("error", None, 0)]
         k = self.run_cmd()
         self.assertEqual([a for a, _ in self.sent], ["Alpha", "Beta"])
         self.assertEqual(len(self.launched), 1)
-        self.assertEqual((k["mod"], k["reason"]), ("tmux", "reset"))
+        self.assertEqual((k["via"], k["reason"]), ("tmux", "reset"))
 
     # --- finding 2: our own session never outlives the wrapper
     def test_an_exception_after_the_start_stops_our_own_session_and_records_the_run(self):
@@ -1062,7 +1062,7 @@ class Stage(StageBase):
         k = self.run_cmd()
         self.assertEqual([a for a, _ in self.sent], ["Alpha"])   # Beta is not tried
         self.assertEqual(self.launched, [])                          # and no fallback session
-        self.assertEqual(k["reason"], "reset-yakin")
+        self.assertEqual(k["reason"], "reset-near")
 
 
 class StageTab(StageBase):
@@ -1077,7 +1077,7 @@ class StageTab(StageBase):
             p = mock.patch.object(S, name, v)
             p.start()
             self.addCleanup(p.stop)
-        p = mock.patch.object(S.subprocess, "Popen", lambda kom, **kw: self.opened.append(kom))
+        p = mock.patch.object(S.subprocess, "Popen", lambda command, **kw: self.opened.append(command))
         p.start()
         self.addCleanup(p.stop)
 
@@ -1091,7 +1091,7 @@ class StageTab(StageBase):
         self.after(60, self.register)                            # wt.exe returned at once; the tab registers a minute later
         k = self.run_cmd()
         self.assertEqual(len(self.opened), 1)
-        self.assertEqual((k["reason"], k["mod"]), ("reset", "tab"))
+        self.assertEqual((k["reason"], k["via"]), ("reset", "tab"))
         self.assertEqual(self.killed, [self.tab_pid])       # ended by its registered pid at the reset
 
     def test_a_windows_tab_that_never_registers_is_stopped_by_its_session_id(self):
@@ -1109,13 +1109,13 @@ class StageClear(StageBase):
         def clear():                                           # same process, new session id and transcript
             o = self.sessions["Alpha"]
             o["sid"] = "44444444-4444-4444-4444-444444444444"
-            o["path"] = S.transkript_path(o["cwd"], o["sid"])
+            o["path"] = S.transcript_path(o["cwd"], o["sid"])
             with open(o["path"], "w") as f:
                 f.write(assistant("claude-opus-5-5", "after-clear"))
             self.write_status("Alpha", "busy")
         self.after(300, clear)
         k = self.run_cmd()
-        self.assertEqual(k["reason"], "reset")                  # not "session-kapandi"
+        self.assertEqual(k["reason"], "reset")                  # not "session-closed"
         self.assertEqual(k["reset_notifier"], "seen")       # the reset message was seen in the NEW transcript
         self.assertEqual(k["turn"], 2)                          # the turn after the marker and the one after /clear
         self.assertIn("has a new session id", self.log())
@@ -1137,22 +1137,22 @@ class Forward(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def forward(self, mod, **env):
+    def forward(self, via, **env):
         from unittest import mock
         path = os.path.join(self.root, "t.jsonl")
-        with mock.patch.dict(os.environ, dict(LAST_WINDOW_CLAUDE=self.fake, FAKE_MARK=os.path.join(self.root, "mark"), FAKE_MODE=mod,
+        with mock.patch.dict(os.environ, dict(LAST_WINDOW_CLAUDE=self.fake, FAKE_MARK=os.path.join(self.root, "mark"), FAKE_MODE=via,
                                               FAKE_TRANSCRIPT=path, LAST_WINDOW_ROLE_SEC="2", **env)):
             return S.forward("Alpha", "hello")
 
     def test_answers(self):
-        self.assertEqual(S.forward_result("**TESLIM**"), "handoff")
-        self.assertEqual(S.forward_result("Done.\nTESLIM."), "handoff")
+        self.assertEqual(S.forward_result("**HANDOFF**"), "handoff")
+        self.assertEqual(S.forward_result("Done.\nHANDOFF."), "handoff")
         self.assertEqual(S.forward_result("MISSING"), "missing")
-        self.assertIsNone(S.forward_result("TESLIMAT"))
+        self.assertIsNone(S.forward_result("HANDOFFS"))
         self.assertEqual(self.forward("ok", FAKE_MARKDOWN="1"), "handoff")
         self.assertEqual(self.forward("missing"), "missing")
         self.assertEqual(self.forward("error"), "error")
-        self.assertEqual(self.forward("bos"), "unknown")
+        self.assertEqual(self.forward("silent"), "unknown")
 
     @unittest.skipIf(os.name == "nt", "the fake relay is an executable script")
     def test_a_relay_timeout_work_unknown(self):
@@ -1176,32 +1176,32 @@ class ModeGate(unittest.TestCase):
         return {"week_used": used, "week_resets_at": reset or self.RESET, "five_hour_used": None, "five_hour_resets_at": None, **kw}
 
     def test_burn_mode_runs_outside_the_window_until_the_weekly_limit(self):
-        k = lambda **kw: S.decision(NOW, self.quota(**{x: v for x, v in kw.items() if x not in ("last", "bos")}), 5, False, kw.get("last"),
-                                 mode_="burn", wait_bos=kw.get("bos"))
+        k = lambda **kw: S.decision(NOW, self.quota(**{x: v for x, v in kw.items() if x not in ("last", "idle_run")}), 5, False, kw.get("last"),
+                                 mode="burn", wait_idle=kw.get("idle_run"))
         self.assertEqual(k()[:2], ("start", "burn-is-open"))
         self.assertEqual(k(used=99)[0], "start")                                       # weekly at 99%: still works
         self.assertEqual(k(used=100)[1], "quota-done")
         self.assertEqual(k(five_hour_used=100, five_hour_resets_at=NOW + H)[1], "five-hour-full")   # 5 h used up: waits for its reset
-        self.assertEqual(k(bos=NOW + 60)[1], "bos-waiting")
+        self.assertEqual(k(idle_run=NOW + 60)[1], "idle-wait")
         self.assertEqual(k(last=NOW - 60)[1], "retry-interval")
-        self.assertEqual(S.decision(NOW, self.quota(), 5, False, None)[1], "window-oncesi")   # the same state without burn mode: nothing
+        self.assertEqual(S.decision(NOW, self.quota(), 5, False, None)[1], "before-window")   # the same state without burn mode: nothing
 
     def test_resume_skips_the_window_and_spacing_but_not_the_lock_or_the_weekly_limit(self):
-        self.assertEqual(S.decision(NOW, self.quota(), 5, False, NOW - 60, mode_="resume")[:2], ("start", "resume"))
-        self.assertEqual(S.decision(NOW, {"week_resets_at": None}, 5, False, None, mode_="resume")[0], "start")   # no weekly data: not blocked
-        self.assertEqual(S.decision(NOW, self.quota(), 5, True, None, mode_="resume")[1], "calisiyor")
-        self.assertEqual(S.decision(NOW, self.quota(used=100), 5, False, None, mode_="resume")[1], "quota-done")
+        self.assertEqual(S.decision(NOW, self.quota(), 5, False, NOW - 60, mode="resume")[:2], ("start", "resume"))
+        self.assertEqual(S.decision(NOW, {"week_resets_at": None}, 5, False, None, mode="resume")[0], "start")   # no weekly data: not blocked
+        self.assertEqual(S.decision(NOW, self.quota(), 5, True, None, mode="resume")[1], "running")
+        self.assertEqual(S.decision(NOW, self.quota(used=100), 5, False, None, mode="resume")[1], "quota-done")
 
     def test_precedence_window_then_burn_mode_then_resume(self):
-        sec = lambda quota, modes, burn, resume: (S.kip_sec(NOW, quota, 5, False, None, 0, modes, burn, resume)[0] or [None])[0]
-        self.assertEqual(sec(self.quota(), ("window",), True, True), "burn")
-        self.assertEqual(sec(self.quota(), ("window", "resume"), False, True), "resume")
-        self.assertIsNone(sec(self.quota(), ("window",), False, False))
-        self.assertEqual(sec(self.quota(reset=NOW + 3 * H), ("window",), True, True), "window")
-        self.assertEqual(len(S.kip_sec(NOW, self.quota(), 5, False, None, 0, ("resume",), False, False)[1]), 0)   # nothing installed/due
+        picks = lambda quota, modes, burn, resume: (S.select_mode(NOW, quota, 5, False, None, 0, modes, burn, resume)[0] or [None])[0]
+        self.assertEqual(picks(self.quota(), ("window",), True, True), "burn")
+        self.assertEqual(picks(self.quota(), ("window", "resume"), False, True), "resume")
+        self.assertIsNone(picks(self.quota(), ("window",), False, False))
+        self.assertEqual(picks(self.quota(reset=NOW + 3 * H), ("window",), True, True), "window")
+        self.assertEqual(len(S.select_mode(NOW, self.quota(), 5, False, None, 0, ("resume",), False, False)[1]), 0)   # nothing installed/due
 
     def test_resume_state_from_pace_json(self):
-        f = lambda u5, r5, dvs=None: S.resume_status({"five_hour_used": u5, "five_hour_resets_at": r5}, dvs or {}, NOW)
+        f = lambda u5, r5, res_state=None: S.resume_status({"five_hour_used": u5, "five_hour_resets_at": r5}, res_state or {}, NOW)
         self.assertEqual(f(100, NOW + H)["reason"], "resume-waiting")                     # 5 h used up, reset to come
         self.assertEqual(f(100, NOW - 60)["reason"], "resume-waiting")                    # reset passed, auto-continue goes first
         d = f(100, NOW - 11 * 60)
@@ -1240,7 +1240,7 @@ class LimitHalt(unittest.TestCase):
         self.n += 1
         sid, cwd = "00000000-0000-0000-0000-%012d" % self.n, "/home/u/w%d" % self.n
         jwr(os.path.join(S.CLAUDE, "sessions", "%d-%d.json" % (self.live.pid, self.n)), session_json(self.live.pid, name, sid, cwd, 1, status))
-        path = S.transkript_path(cwd, sid)
+        path = S.transcript_path(cwd, sid)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(assistant("claude-opus-5-5") + "".join(lines))
@@ -1259,16 +1259,16 @@ class LimitHalt(unittest.TestCase):
 
     def test_due_sessions_by_pace_reset_or_by_the_stop_alone(self):
         self.add("stopped", limit_line(NOW - 2 * H))
-        self.add("calisiyor", limit_line(NOW - 2 * H, uuid="d2"), status="busy")       # busy = it already went on
+        self.add("running", limit_line(NOW - 2 * H, uuid="d2"), status="busy")       # busy = it already went on
         self.add("old", limit_line(NOW - 13 * H, uuid="d3"))                          # older than RESUME_MAX_AGE
         self.add("last-window-emre", limit_line(NOW - 2 * H, uuid="d4"))             # last-window's own session
-        name = lambda r5, **kw: [o["name"] for o in S.limitte_stopped(S.read_sessions(model=False), r5, NOW, **kw)]
+        name = lambda r5, **kw: [o["name"] for o in S.limit_stopped(S.read_sessions(model=False), r5, NOW, **kw)]
         self.assertEqual(name(NOW - 11 * 60), ["stopped"])                                    # reset 11 min ago (pace.json)
         self.assertEqual(name(NOW - 5 * 60), [])                                            # reset 5 min ago: the grace is not over
         self.assertEqual(name(NOW - 11 * 60, warned=["dur-1"]), [])                       # already relayed for this stop
         self.assertEqual(name(NOW - 11 * 60, skip={"stopped"}), [])
         self.assertEqual(name(None), [])                                                    # no pace: stop + 5 h is still ahead
-        self.assertEqual([o["name"] for o in S.limitte_stopped(S.read_sessions(model=False), None, NOW + 3 * H + 11 * 60)], ["stopped"])
+        self.assertEqual([o["name"] for o in S.limit_stopped(S.read_sessions(model=False), None, NOW + 3 * H + 11 * 60)], ["stopped"])
 
 
 class BurnStatus(unittest.TestCase):
@@ -1287,12 +1287,12 @@ class BurnStatus(unittest.TestCase):
         self.assertFalse(S.burn_duration_full(NOW))
         self.assertFalse(S.burn_is_open(NOW + 60))                                          # at the reset it is off, even unwritten
         self.assertTrue(S.burn_duration_full(NOW + 61))
-        self.assertEqual(jrd(S.burn_path())["closer"], "otomatik (haftalik sifirlanma)")
+        self.assertEqual(jrd(S.burn_path())["closer"], "automatic (weekly reset)")
         self.assertFalse(S.burn_duration_full(NOW + 62))
         self.assertFalse(S.burn_is_open(NOW, {}))                                           # never switched on
 
     def test_the_brief_keeps_only_the_blocks_of_its_mode(self):
-        text = "a\n<!-- kip:pencere -->\nP\n<!-- /kip -->\n<!-- kip:bitir,pencere -->\nB\n<!-- /kip -->\nz\n"
+        text = "a\n<!-- mode:window -->\nP\n<!-- /mode -->\n<!-- mode:burn,window -->\nB\n<!-- /mode -->\nz\n"
         self.assertEqual(S.mode_blocks(text, "window"), "a\nP\nB\nz\n")
         self.assertEqual(S.mode_blocks(text, "burn"), "a\nB\nz\n")
 

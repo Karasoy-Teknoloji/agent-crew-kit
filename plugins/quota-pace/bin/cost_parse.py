@@ -13,7 +13,7 @@ new session folder), so the same API response can sit in several files. A respon
 counted ONCE across all files (cost_core.ownership picks the single file that owns it).
 
 Prices live in ONE data file, cost-prices.json, next to this file. A local file replaces single models
-(or the write multipliers) without touching the packaged copy: $COST_PRICES (a path) or <config dir>/cost/fiyatlar.json.
+(or the write multipliers) without touching the packaged copy: $COST_PRICES (a path) or <config dir>/cost/prices.json.
 """
 import calendar
 import hashlib
@@ -63,7 +63,7 @@ class PriceError(Exception):
     pass
 
 
-def _json_oku(path):
+def _read_json(path):
     with open(path, encoding="utf-8") as f:
         d = json.load(f)
     if not isinstance(d, dict):
@@ -75,15 +75,15 @@ def load_price():
     """Packaged price table, with the local override merged on top (model keys replace, the rest is kept).
     Returns the merged dict; raises PriceError when the packaged file is unreadable."""
     try:
-        d = _json_oku(PRICE_PACKAGE)
+        d = _read_json(PRICE_PACKAGE)
     except (OSError, ValueError) as e:
-        raise PriceError("Fiyat tablosu okunamadı: %s (%s)" % (PRICE_PACKAGE, e))
+        raise PriceError("Could not read the price table: %s (%s)" % (PRICE_PACKAGE, e))
     local = os.environ.get("COST_PRICES") or PRICE_LOCAL
     if os.path.isfile(local):
         try:
-            o = _json_oku(local)
+            o = _read_json(local)
         except (OSError, ValueError) as e:
-            raise PriceError("Yerel fiyat dosyası geçersiz: %s (%s)" % (local, e))
+            raise PriceError("Invalid local price file: %s (%s)" % (local, e))
         d["models"] = dict(d.get("models") or {}, **(o.get("models") or {}))
         if o.get("writing_multiplier"):
             d["writing_multiplier"] = dict(d.get("writing_multiplier") or {}, **o["writing_multiplier"])
@@ -121,7 +121,7 @@ class Price:
 
 def request_cost(price, r):
     """API list-price cost of ONE parsed response (the single cost formula: the daily/hourly records, the sub-agent row and the
-    calibration all use it). r = a dict as ayristir() returns it. Returns (usd, advisor, unpriced_tokens):
+    calibration all use it). r = a dict as parse() returns it. Returns (usd, advisor, unpriced_tokens):
     usd = cost of the response itself, None when its model is not in the price table (then its tokens count as unpriced);
     advisor = [(advisor model, usd)] for the advisor calls inside the response (an unpriced advisor model is skipped and its tokens
     counted as unpriced). Long-prompt tier (e.g. Haiku 5.5 over 100k prompt tokens) multiplies the whole response."""
@@ -210,7 +210,7 @@ def parse(path, excluding=None):
     ts (first line of the response), model, in, out, cr (cache read), cw5 / cw1h (cache write 5m / 1h), adv (advisor calls),
     k (hash of the key). Streaming repeats the same response as several lines with a growing usage: the FINAL usage counts,
     taken as the per-field maximum over the lines (usage only grows within one response), never the sum.
-    haric: set of key hashes owned by another file (see cost_core.ownership); those responses are skipped here.
+    excluding: set of key hashes owned by another file (see cost_core.ownership); those responses are skipped here.
     Corrupt or partial lines are skipped. No prompt/answer text is read into the result. Returns {"reqs": [...], "t0": first / "t1": last timestamp of the file (epoch, or None)}."""
     requests = {}
     order = []

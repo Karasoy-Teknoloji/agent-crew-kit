@@ -1,6 +1,6 @@
 {
   "source": "Official pricing page https://platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-29 (cache read multiplier: Fable 5.1 / Mythos 5.1 0.025x, Opus/Sonnet 5.5 0.05x, others 0.1x; Claude 4.6+ models except Haiku 5.5 have no long-context premium; Haiku 5.5 is priced per request by prompt length, over 100k prompt tokens x5 on every field). Update this file when prices or models change and note the date here.",
-  "local_change": "Do not edit per machine: put overrides in ~/.claude/cost/fiyatlar.json (same layout, only the models you change; replaces entries by model key) or point COST_PRICES to a file.",
+  "local_change": "Do not edit per machine: put overrides in ~/.claude/cost/prices.json (same layout, only the models you change; replaces entries by model key) or point COST_PRICES to a file.",
   "unit": "USD per 1M tokens; the model id is matched by PREFIX (longest prefix wins). A model that matches nothing is unpriced: its cost counts as 0 and its tokens are reported as 'unpriced'. writing_multiplier = cache write price as a multiple of the input price (5-minute and 1-hour cache). long_prompt_threshold / long_prompt_multiplier = prompt-size threshold and price multiplier for long prompts.",
   "writing_multiplier": {
     "5m": 1.25,

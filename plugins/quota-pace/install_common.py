@@ -1333,7 +1333,7 @@ def last_window_extra(a, python, claude, tag, script):
         say(f"{tag}Ortak kayit (raporlar/last-window/) ve yerel runlog {posix(claude / 'last-window')} korunur.")
         return ok
     tpl = (SRC / "systemd" / f"{SP_UNIT}.service.in").read_text(encoding="utf-8")
-    svc_text = tpl.replace("@EXEC@", f"{unit_q(python)} -I {unit_q(posix(script))}").replace("@TETIK@", sp_trigger(a)).replace("@ENV@", sp_env()).replace("@GITORG@", sp_git_org())
+    svc_text = tpl.replace("@EXEC@", f"{unit_q(python)} -I {unit_q(posix(script))}").replace("@TRIGGER@", sp_trigger(a)).replace("@ENV@", sp_env()).replace("@GITORG@", sp_git_org())
     generate_write(svc, svc_text, tag)
     generate_write(tmr, (SRC / "systemd" / f"{SP_UNIT}.timer").read_text(encoding="utf-8"), tag)
     if a.whatif:
