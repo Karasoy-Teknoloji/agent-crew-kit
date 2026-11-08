@@ -341,7 +341,7 @@ class Launchd(unittest.TestCase):
         d = self.agent()
         self.assertEqual(d["ProgramArguments"], [sys.executable, "-I", os.path.join(self.claude, "bin", "cost.py"), "--save"])
         self.assertEqual(calls, [["bootout", domain + "/" + LABEL], ["bootstrap", domain, self.plist]])
-        self.assertNotIn("no timer", r.stdout)
+        self.assertNotIn("no timer (Linux", r.stdout)
         self.assertFalse(os.path.exists(os.path.join(self.home, ".config", "systemd")))
         r, calls = self.run_mac("--cost")                                          # second install: same file, reloaded once
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -375,7 +375,7 @@ class Launchd(unittest.TestCase):
         r, calls = self.run_mac("--cost", real=False)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(calls, [])
-        self.assertIn("launchctl calistirilmadi", r.stdout)
+        self.assertIn("launchctl not run", r.stdout)
         self.assertTrue(os.path.isfile(self.plist))                                   # the file is still rendered
 
     def test_whatif_writes_no_plist_and_calls_nothing(self):

@@ -130,7 +130,7 @@ class Installer(unittest.TestCase):
         self.assertIn("Persistent=true", tmr)
         self.assertIn("RandomizedDelaySec=", tmr)
         # a scratch HOME must never drive the real systemd user manager
-        self.assertIn("systemctl calistirilmadi", r.stdout)
+        self.assertIn("systemctl not run", r.stdout)
         self.assertFalse(os.path.exists(self.calls), "systemctl was called under a scratch HOME")
 
     def test_rerun_is_idempotent_and_whatif_writes_nothing(self):
@@ -176,7 +176,7 @@ class Installer(unittest.TestCase):
         r = self.run_as_real_home("--cost")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(rd(self.calls).split("\n")[:2], ["--user daemon-reload", "--user enable --now cost-daily.timer"])
-        self.assertNotIn("calistirilmadi", r.stdout)
+        self.assertNotIn("systemctl not run", r.stdout)
         os.remove(self.calls)
         r = self.run_as_real_home("--remove")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -263,7 +263,7 @@ class Installer(unittest.TestCase):
         on = line()
         self.assertIn("cache 93% (2 misses)", on)
         self.assertIn("session $1.23", on)
-        self.assertIn("son 24sa $", on)
+        self.assertIn("last 24h $", on)
         self.assertNotIn("cache ", line(COST_STATUS="0"))                  # env switch
         open(os.path.join(self.claude, "cost", "off"), "w").close()
         self.assertNotIn("cache ", line())                                   # marker file switch
@@ -555,7 +555,7 @@ class WindowsInstaller(unittest.TestCase):
         on = self.line(payload)
         self.assertIn("cache 93% (2 misses)", on)
         self.assertIn("session $1.23", on)
-        self.assertIn("son 24sa $", on)
+        self.assertIn("last 24h $", on)
         self.assertNotIn("cache ", self.line(payload, COST_STATUS="0"))
         open(os.path.join(self.claude, "cost", "off"), "w").close()
         off = self.line(payload)

@@ -455,7 +455,7 @@ class Working(unittest.TestCase):
         return path
 
     def run_sp(self, *args, mode="ok", **extra):
-        return subprocess.run([sys.executable, "-I", SP, *args], capture_output=True, text=True, encoding="utf-8", env=self.env(mode, **extra), timeout=120)
+        return subprocess.run([sys.executable, "-I", SP, *args], capture_output=True, text=True, encoding="utf-8", env=self.env_(mode, **extra), timeout=120)
 
     def env_(self, mode="ok", **extra):
         env = {k: v for k, v in os.environ.items() if k not in ("PACE_TARGET_HOURS", "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME", "LAST_WINDOW_DIR", "LAST_WINDOW_EXCLUDING",
@@ -833,7 +833,7 @@ class Working(unittest.TestCase):
         self.pace(120)
         self.write_burn(week_reset=jrd(os.path.join(self.claude, "pace.json"))["week_resets_at"])
         p = subprocess.Popen([sys.executable, "-I", SP, "trigger"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
-                             env=self.env(PACE_TARGET_HOURS="0", FAKE_TRANSCRIPT=path))
+                             env=self.env_(PACE_TARGET_HOURS="0", FAKE_TRANSCRIPT=path))
         self.addCleanup(lambda: p.poll() is None and p.kill())
         end_at = time.time() + 60
         while not self.sent() and time.time() < end_at:
