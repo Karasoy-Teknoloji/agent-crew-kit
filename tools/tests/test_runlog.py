@@ -111,7 +111,7 @@ class DailyTest(unittest.TestCase):
         path = os.path.join(self.tmp, "f.log")
         lg, _ = self.lg(path=path, fmt="%(asctime)s [task] %(message)s")
         lg.info("100% café")
-        self.assertRegex(read(path), r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \[gorev\] 100% café\n$")
+        self.assertRegex(read(path), r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \[task\] 100% café\n$")
 
 
 if __name__ == "__main__":
