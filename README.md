@@ -75,7 +75,7 @@ Edit the rule files on that branch and commit. Changes on `main` reach you only 
 
 ### Evidence hook
 
-`tools/evidence_hook.py` blocks the assistant's final message when it (1) hedges ("probably", "likely", ...), (2) claims missing access or asks for a credential without a `vault_cli.py find` search in the same turn, or (3) answers a decision from the user without recording it on GitHub (or a `Decision record: ...` line). It never loops and fails open. The installer registers it for `Stop` and `SubagentStop`.
+`tools/evidence_hook.py` blocks the assistant's final message when it (1) hedges ("probably", "likely", ...), (2) claims missing access or asks for a credential without a Vault search in the same turn (`vault_cli.py find`, or the commands of the key `evidence-search-commands`, see Configuration), or (3) answers a decision from the user without recording it on GitHub (or a `Decision record: ...` line). It never loops and fails open. The installer registers it for `Stop` and `SubagentStop`.
 
 ## Configuration
 
@@ -89,6 +89,7 @@ Every setting has a documented default, so the kit works standalone. One reader,
 | Key | File | Default | Used by |
 |---|---|---|---|
 | `VAULT_ADDR`, `VAULT_TOKEN` | `~/.vault-token` | none: `vault_cli.py` exits with "VAULT_ADDR is not set" | `tools/vault_cli.py` |
+| `EVIDENCE_HOOK_SEARCH_COMMANDS` | `evidence-search-commands` | `vault_cli.py find` | `tools/evidence_hook.py`: comma-separated search commands (`<tool>[.py] <subcommand>`) that count as the Vault search before a missing-access claim, e.g. `vault_cli.py find, team_vault.py lookup`; the block reason names the first one |
 | `VAULT_FIND_EXCLUDING` | `vault-find-excluding` | none | `vault_cli.py find`: comma-separated `<mount>/<path>/` prefixes never listed or read (e.g. an alerting backup tier) |
 | `GH_ORG` | `org` | none: the GitHub org features are off | `tools/gh_board.py` (required), the ranking's 7-day commit column, the last-window issue search |
 | `GH_BOARD_TEST_QUEUE` | `test-queue` | `0` (none) | `gh_board.py`: number of an org-wide test-queue project |
@@ -102,6 +103,7 @@ Every setting has a documented default, so the kit works standalone. One reader,
 | `LAST_WINDOW_CHANNEL`, `LAST_WINDOW_CHANNEL_ID` | `channel`, `channel-id` | `#ai-status`; none | the team's AI status channel |
 | `COST_SEPARATE_BOARDS` | | none | project numbers never counted as finished work |
 | `PACE_TARGET_HOURS` | | `5` | hours before the weekly reset the forecast aims at |
+| `CLAUDE_SHARED_TEAM_CONFIG_DIR` | (env only) | `<clone>/team-config` | the folder of layer 3 above; the kit's tests set it to an empty temp folder (see Team fork) |
 
 The people list of the shared usage repo (`people.json`):
 
@@ -116,6 +118,17 @@ Roles: `developer` (developer: picks board work), `tester` (tester), `manager` (
 ### Team fork
 
 A team can run its own fork of this kit and merge kit `main` into it. It keeps its values in committed `team-config/<file>` files (keys above) instead of editing shared code. If the fork ships `tools/team_migrate.py`, the installer and the `rules_watch.py` background run call `team_migrate.py --ensure` first (before the saved install record or `quota-pace.json` is read), with a timeout. The call fails open: a failure or a timeout is reported and the install or update goes on. After a background pull that moved HEAD, the hook runs once more so a migration that arrived with the pull applies in the same cycle. The script must be idempotent (it can run many times, also right after it finished). The kit serializes runs with a lock file (`~/.claude/team-migrate.lock`, taken over after the timeout plus 30 s): a second caller skips the migration with a one-line note. The kit itself ships no such script.
+
+Running the kit's own tests inside a fork. The suites must pass in a fork without edits, so they never read the fork's files:
+
+- **Team config.** The suites with `tools/settings.py` in reach (`tools/tests`, `plugins/quota-pace/tests`) each start with `test_00_team_isolation.py`, which calls `isolate_team_config()` from `tools/tests/fork_support.py`. That points `CLAUDE_SHARED_TEAM_CONFIG_DIR` (layer 3 above) at an empty temp folder, so a test never reads or writes the team's `team-config/` values (report folders, org, remote). Run the suites with `unittest discover` as shown under Tests; a single module run on its own is not isolated.
+- **`team-owned` paths.** The scan tests (no direct process start, `hidden_loader` imports, no machine-specific strings in shipped files) check every file of the repo. A fork lists the paths that are its own, and not the kit's, with the git attribute `team-owned` in its `.gitattributes`, one pattern per line (git's own pattern syntax):
+
+  ```
+  tools/lab/**    team-owned
+  ```
+
+  `fork_support.drop_team_owned()` reads it with `git check-attr`, with a throwaway git dir and the folder as work tree, so it works in a clone, a worktree and a `git archive` export. The scans skip those paths. Without a `.gitattributes` (the kit itself), or without git, they scan everything. The attribute is the only mechanism: the kit keeps no list of its own.
 
 ### Usage ranking (optional)
 
