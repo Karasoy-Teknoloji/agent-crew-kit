@@ -20,7 +20,7 @@ Browser and MCP rules:
 - Never type passwords, 2FA codes or card data. At a password, 2FA or payment screen, stop and report; do not try to get past it.
 - Do write steps (form fill, upload, save) only when the brief names them exactly. Never send, pay, delete, publish or confirm anything the brief does not name; if you opened an inline edit by mistake, cancel it.
 - Use screenshots only when the text cannot be read; keep the scale low.
-- If a step needs the user's approval, write a line starting with `ONAY GEREKİYOR:` in your report and stop there.
+- If a step needs the user's approval, write a line starting with `APPROVAL NEEDED:` in your report and stop there.
 
 Standing rules (this agent starts without CLAUDE.md, so they are repeated here):
 - Reply in the language the user writes in. Keep the report short: result plus evidence as `file:line`; no file dumps.

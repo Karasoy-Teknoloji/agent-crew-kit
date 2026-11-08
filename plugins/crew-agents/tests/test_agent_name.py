@@ -51,13 +51,13 @@ class AgentName(unittest.TestCase):
             f.write(content)
 
     def test_personal_list_is_used_and_invalid_lines_skipped(self):
-        lines = ["# header", "", "Orman", "Leaf", "leaf", "Orman", "Çam", "İnci", "Ab1", "ÇokUzunBirAd", "İki Kelime",
-                    "Deniz", "Derya", "Dalga", "Mercan", "Lagün", "Körfez", "Ada"]
+        lines = ["# header", "", "Forest", "Leaf", "leaf", "Forest", "Pine", "Iris", "Ab1", "WayTooLongAName", "Two Words",
+                    "Sea", "Ocean", "Wave", "Coral", "Lagoon", "Gulf", "Reef"]
         self.personal("\n".join(lines) + "\n")
-        self.assertEqual(self.module().name_list(), ("Orman", "Leaf", "Çam", "İnci", "Deniz", "Derya", "Dalga", "Mercan", "Lagün", "Körfez", "Ada"))
+        self.assertEqual(self.module().name_list(), ("Forest", "Leaf", "Pine", "Iris", "Sea", "Ocean", "Wave", "Coral", "Lagoon", "Gulf", "Reef"))
 
     def test_too_few_valid_names_falls_back_to_team_list(self):
-        self.personal("# x" + "\n" + "Orman" + "\n" + "Leaf" + "\n" + "bad1" + "\n")
+        self.personal("# x" + "\n" + "Forest" + "\n" + "Leaf" + "\n" + "bad1" + "\n")
         k = self.module()
         self.assertEqual(k.name_list(), k.NAME_LIST)
 
@@ -66,16 +66,16 @@ class AgentName(unittest.TestCase):
         self.assertEqual(k.name_list(), k.NAME_LIST)
 
     def test_no_repeats_with_personal_list_in_one_session(self):
-        names_ = ["Orman", "Leaf", "Filiz", "Fidan", "Keep", "Çam", "Köknar", "Ladin", "Kayın", "Meşe", "Çınar", "Sedir"]
+        names_ = ["Forest", "Leaf", "Sprout", "Sapling", "Keep", "Pine", "Fir", "Spruce", "Beech", "Oak", "Elm", "Sedir"]
         self.personal("\n".join(names_))
         k = self.module()
-        names = [k.ad_sec("session-p", random.Random(i)) for i in range(len(names_) + 3)]
+        names = [k.pick_name("session-p", random.Random(i)) for i in range(len(names_) + 3)]
         self.assertEqual(len(set(names)), len(names))
         self.assertEqual(set(names[:len(names_)]), set(names_))
         self.assertTrue(all(a.endswith("-2") for a in names[len(names_):]))
 
     def test_hook_uses_personal_list(self):
-        names_ = ["Orman", "Leaf", "Filiz", "Fidan", "Keep", "Çam", "Köknar", "Ladin", "Kayın", "Meşe"]
+        names_ = ["Forest", "Leaf", "Sprout", "Sapling", "Keep", "Pine", "Fir", "Spruce", "Beech", "Oak"]
         self.personal("\n".join(names_))
         r = run_cmd(event(), self.folder)
         name = json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]["description"].split(" · ", 1)[0]
@@ -105,14 +105,14 @@ class AgentName(unittest.TestCase):
 
     def test_no_repeats_in_one_session_and_numbered_after_the_list(self):
         k = self.module()
-        names = [k.ad_sec("session-a", random.Random(i)) for i in range(len(k.NAME_LIST) + 5)]
+        names = [k.pick_name("session-a", random.Random(i)) for i in range(len(k.NAME_LIST) + 5)]
         self.assertEqual(len(set(names)), len(names))
         self.assertEqual(set(names[:len(k.NAME_LIST)]), set(k.NAME_LIST))
         self.assertTrue(all(a.endswith("-2") for a in names[len(k.NAME_LIST):]))
-        self.assertIn(k.ad_sec("session-b"), k.NAME_LIST)          # another session starts fresh
+        self.assertIn(k.pick_name("session-b"), k.NAME_LIST)          # another session starts fresh
 
     def test_passes_through_unchanged(self):
-        for o in (event(tool="Bash"), event(prompt=""), event(prompt=None), event(description="Poyraz · Fix", prompt="x"),
+        for o in (event(tool="Bash"), event(prompt=""), event(prompt=None), event(description="Breeze · Fix", prompt="x"),
                   event(prompt="Your name is Lodos. ...")):
             with self.subTest(o=o["tool_input"]):
                 r = run_cmd(o, self.folder)

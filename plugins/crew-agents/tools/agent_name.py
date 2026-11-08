@@ -2,13 +2,13 @@
 """PreToolUse hook (matcher "Agent|Task"): gives every spawned subagent a short random name.
 
 The Claude Code UI shows a subagent only by its type ("Message from @senior-developer-oh"), so parallel agents of one type look
-the same. This hook picks a name from NAME_LIST (Turkish nature and weather words, none of them a colleague's first name) and
+the same. This hook picks a name from NAME_LIST (English nature and weather words, none of them a colleague's first name) and
 returns the Agent tool input through `hookSpecificOutput.updatedInput` (which replaces the whole input, so every other field is
 passed on unchanged) with:
   - `description` prefixed with "<Name> · ";
   - one line prepended to `prompt`: "Your name is <Name>. Start every status message and your final report with '<Name>:'."
 Names do not repeat inside one session: the used names are kept in <tempdir>/crew-agent-names/<session_id>.json (files older than
-two days are removed on the way). When all names are used, a number is appended (Poyraz-2).
+two days are removed on the way). When all names are used, a number is appended (Breeze-2).
 A person may replace the list with ~/.config/claude-shared/agent-names (see name_list).
 
 It runs on every agent spawn, so it fails open: any error, an unknown tool, a missing prompt or an input that already carries a
@@ -24,16 +24,16 @@ import time
 
 NAME_LIST = (
     # winds and weather
-    "Poyraz", "Lodos", "Karayel", "Meltem", "Ayaz", "Kırağı", "Tipi", "Bora", "Kasırga", "Şimşek", "Sis", "Full",
+    "Breeze", "Gale", "Zephyr", "Monsoon", "Mistral", "Frost", "Blizzard", "Squall", "Thunder", "Drizzle", "Fog", "Dawn",
     # mountains
-    "Toros", "Kaçkar", "Erciyes", "Uludağ", "Munzur", "Ilgaz", "Nemrut", "Süphan", "Cudi", "Bozdağ", "Spil", "Honaz",
+    "Everest", "Alps", "Andes", "Rainier", "Denali", "Fuji", "Matterhorn", "Elbrus", "Olympus", "Summit", "Ridge", "Crag",
     # rivers
-    "Fırat", "Dicle", "Aras", "Çoruh", "Göksu", "Gediz", "Meriç", "Ceyhan", "Seyhan", "Sakarya", "Menderes", "Zamantı",
+    "Danube", "Nile", "Amazon", "Rhine", "Volga", "Yukon", "Thames", "Ganges", "Mekong", "Loire", "Seine", "Tiber",
     # birds and animals
-    "Kartal", "Martı", "Atmaca", "Turna", "Leylek", "Serçe", "Kumru", "Keklik", "Balaban", "Çaylak", "Kırlangıç", "Baykuş",
-    "Vaşak", "Karakulak", "Tilki", "Sincap", "Kunduz",
+    "Falcon", "Heron", "Osprey", "Crane", "Swallow", "Sparrow", "Dove", "Finch", "Kestrel", "Magpie", "Owl", "Wren",
+    "Lynx", "Otter", "Fox", "Badger", "Beaver",
     # trees
-    "Çınar", "Meşe", "Ardıç", "Sedir", "Söğüt", "Ihlamur", "Gürgen",
+    "Cedar", "Maple", "Juniper", "Willow", "Birch", "Linden", "Hazel",
 )
 PERSONAL_FILE = ("~", ".config", "claude-shared", "agent-names")   # personal override of NAME_LIST, same folder as `person` / `plan`
 MIN_PERSONAL = 10
@@ -101,7 +101,7 @@ def name_list():
     return NAME_LIST
 
 
-def ad_sec(session, randomly=random):
+def pick_name(session, randomly=random):
     """A name not used yet in this session (session_id `session`), recorded as used."""
     os.makedirs(STATUS_FOLDER, exist_ok=True)
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in (session or "session-missing"))[:120]
@@ -163,7 +163,7 @@ def answer(event):
         return None
     if already_named(input_):
         return None
-    name = ad_sec(str(event.get("session_id") or ""))
+    name = pick_name(str(event.get("session_id") or ""))
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": named_input(input_, name)}}
 
 

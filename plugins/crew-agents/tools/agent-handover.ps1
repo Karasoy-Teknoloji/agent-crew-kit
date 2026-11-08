@@ -16,7 +16,7 @@ if (-not $f -or -not (Test-Path $f) -or (Get-Item $f).Length -eq 0) {
 }
 if (-not $f -or -not (Test-Path $f)) { throw "Transcript not found: $Id" }
 
-function Kisalt([string]$s, [int]$n) { if ($s.Length -gt $n) { $s.Substring(0, $n) + ' ...' } else { $s } }
+function Truncate([string]$s, [int]$n) { if ($s.Length -gt $n) { $s.Substring(0, $n) + ' ...' } else { $s } }
 
 $user = [System.Collections.Generic.List[string]]::new()
 $assistant = [System.Collections.Generic.List[string]]::new()
@@ -36,7 +36,7 @@ foreach ($line in [System.IO.File]::ReadLines($f)) {
 "===== FIRST TASK ====="
 if ($user.Count) { $user[0] }
 "`n===== LATER INSTRUCTIONS ($([Math]::Max(0, $user.Count - 1))) ====="
-for ($i = 1; $i -lt $user.Count; $i++) { "--- [$i]"; Kisalt $user[$i] 3000 }
+for ($i = 1; $i -lt $user.Count; $i++) { "--- [$i]"; Truncate $user[$i] 3000 }
 "`n===== LAST $Last ASSISTANT MESSAGES (oldest first) ====="
-$bas = [Math]::Max(0, $assistant.Count - $Last)
-for ($i = $bas; $i -lt $assistant.Count; $i++) { "--- [$i]"; Kisalt $assistant[$i] $Length }
+$start = [Math]::Max(0, $assistant.Count - $Last)
+for ($i = $start; $i -lt $assistant.Count; $i++) { "--- [$i]"; Truncate $assistant[$i] $Length }
