@@ -1,4 +1,4 @@
-"""statusline.sh must pass the forecast's runout_at into pace.json: cost_share.end_at_extra() reads it for the "Tahmini bitiş" column
+"""statusline.sh must pass the forecast's runout_at into pace.json: cost_share.end_at_extra() reads it for the forecast run-out column
 (without it the column stays "—" for everyone). A null runout_at (no run-out before the reset) must stay null, not vanish.
 Run: python3 -I -m unittest discover -s plugins/quota-pace/tests -p 'test_pace_runout_at.py'"""
 import json, os, shutil, subprocess, tempfile, time, unittest

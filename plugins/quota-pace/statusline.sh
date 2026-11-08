@@ -118,7 +118,7 @@ if [ -n "$pace" ]; then
   if [ "$cost_on" = 1 ] && [ "${QUOTA_SHARE_AUTO:-1}" != 0 ] && [ -f "$kt/bin/cost_share.py" ]; then
     due=$(stat -c %Y ~/.claude/cost/share-following 2>/dev/null || stat -f %m ~/.claude/cost/share-following 2>/dev/null || echo 0)
     if [ "$due" -le "$nowts" ] && [ -f ~/.config/claude-shared/plan ]; then
-      plock=$(stat -c %Y ~/.claude/cost/paylas.lock 2>/dev/null || stat -f %m ~/.claude/cost/paylas.lock 2>/dev/null || echo 0)
+      plock=$(stat -c %Y ~/.claude/cost/share.lock 2>/dev/null || stat -f %m ~/.claude/cost/share.lock 2>/dev/null || echo 0)
       if [ "$plock" = 0 ] || [ $(( nowts - plock )) -ge 1800 ]; then
         if command -v setsid >/dev/null; then
           (setsid nohup python3 -E "$kt/bin/cost.py" --share --automatic </dev/null >/dev/null 2>&1 &)
