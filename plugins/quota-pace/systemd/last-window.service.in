@@ -5,13 +5,13 @@
 # unit that is still running (one coordinator per user). The fallback runs on last-window's own tmux server (`tmux -L last-window`),
 # started by this unit, so it lives in this unit's cgroup (KillMode=control-group) and ends with the run; the user's own tmux server
 # (default socket) is never used or started here. Watch it from any terminal of the same user: `tmux -L last-window attach -t last-window-<person>`.
-# @TETIK@ = `tetik --modes pencere,devam` as installed (--last-window = pencere, --resume-alarm = devam; burn mode runs when switched on).
+# @TRIGGER@ = `trigger --modes window,resume` as installed (--last-window = window, --resume-alarm = resume; burn mode runs when switched on).
 [Unit]
 Description=Claude Code last-window: last window, 5-hour resume alarm, burn mode (last-window trigger)
 
 [Service]
 Type=oneshot
-ExecStart=@EXEC@ @TETIK@
+ExecStart=@EXEC@ @TRIGGER@
 @ENV@# Git auth without an ssh agent (none in a user service): the org's (GH_ORG) ssh remotes are read over https instead, so
 # the push uses the gh credential helper from ~/.gitconfig, the same path as the daily cost job (cost-daily). Org-scoped on purpose.
 Environment="GIT_TERMINAL_PROMPT=0"
