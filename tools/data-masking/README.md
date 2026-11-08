@@ -169,7 +169,7 @@ Everything is created at first use with mode `0600`; the repo ships no key and n
 |---|---|---|
 | HMAC key (32 random bytes, hex; never printed) | `~/.claude/.mask-key` | `TRIM_KEY_FILE` |
 | Count log (counts per run, never values) | `~/.claude/mask-count.log` | `TRIM_COUNT_LOG` |
-| Allowlist | `~/.claude/mask-allowed.txt` | `TRIM_ALLOWLIST` |
+| Allowlist | `~/.claude/mask-allowlist.txt` | `TRIM_ALLOWLIST` |
 | Stored full output of truncated results (7 days) | `~/.claude/tool-output/` | - |
 
 Keep the key per person. Do not commit it or copy it to shared machines. If the key file cannot be created, a temporary

@@ -890,7 +890,7 @@ def forward_result(output):
 
 def forward(name, text_, time_overrun=None):
     """Hand `text` to the live session named `name`. A cross-session message can only be sent from inside a Claude session, so a one-shot
-    headless Haiku does it with ListAgents + SendMessage (same pattern as ~/.claude/bin/takilan-watchdog.py and server-session.sh `forward`;
+    headless Haiku does it with ListAgents + SendMessage (same pattern as ~/.claude/bin/stuck-watchdog.py and server-session.sh `forward`;
     no direct CLI/IPC route exists: the per-session socket in cc-socks is undocumented). Returns:
       'handoff'   the relay answered HANDOFF (sent; a busy target shows it only at the end of its current turn)
       'missing'      a clear MISSING (no such session, not sent)
