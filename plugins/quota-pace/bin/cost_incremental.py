@@ -8,8 +8,8 @@ response is written as several consecutive lines with a growing usage; its final
 response starts). A refresh reads only the bytes appended since the last call. Parsing and pricing are the shared ones from
 cost_parse (merge_usage, request_cost, cost-prices.json): one price table, one formula.
 
-State: <config dir>/cost/ajan/<name>.json (0600, written atomically); a state older than 7 days is deleted when a new one is made.
-Never raises to the caller: toplam() returns None when anything is wrong (the caller then shows no cost).
+State: <config dir>/cost/agent/<name>.json (0600, written atomically); a state older than 7 days is deleted when a new one is made.
+Never raises to the caller: total() returns None when anything is wrong (the caller then shows no cost).
 """
 import json
 import os
@@ -18,9 +18,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python -I does not add the script directory
 
-import cost_parse as AO  # noqa: E402
+import cost_parse as CP  # noqa: E402
 
-DIR = os.path.join(AO.CLAUDE, "cost", "agent")
+DIR = os.path.join(CP.CLAUDE, "cost", "agent")
 OLD = 7 * 86400
 QUEUE = 16 * 1024 * 1024    # first read of a long main transcript: only its last 16 MB
 LAST_CLOSED = 24     # keys of the last closed responses kept (guards against a response repeated later in the file)
@@ -30,7 +30,7 @@ _price = None
 def _price_table():
     global _price
     if _price is None:
-        _price = AO.Price(AO.load_price())
+        _price = CP.Price(CP.load_price())
     return _price
 
 
@@ -43,7 +43,7 @@ def _read_status(path):
     try:
         with open(path, encoding="utf-8") as f:
             d = json.load(f)
-        if isinstance(d, dict) and d.get("v") == 1:
+        if isinstance(d, dict) and d.get("v") == 2:
             return d
     except (OSError, ValueError):
         pass
@@ -74,20 +74,20 @@ def _delete_old():
 
 
 def _new_status():
-    return {"v": 1, "off": 0, "usd": 0.0, "is_open": None, "closed": [], "fz": 0}
+    return {"v": 2, "off": 0, "usd": 0.0, "open": None, "closed": [], "unpriced": 0}   # v2: English keys
 
 
 def _close(d, price):
     """Close the open response: add its cost to the sum."""
-    a = d["is_open"]
+    a = d["open"]
     if a is None:
         return
-    r = AO.request_burn(dict(a, adv=list(a["adv"])))
-    usd, advler, fz = AO.request_cost(price, r)
-    d["usd"] += (usd or 0.0) + sum(x for _m, x in advler)
-    d["fz"] += fz
+    r = CP.request_burn(dict(a, adv=list(a["adv"])))
+    usd, advs, unpriced = CP.request_cost(price, r)
+    d["usd"] += (usd or 0.0) + sum(x for _m, x in advs)
+    d["unpriced"] += unpriced
     d["closed"] = (d["closed"] + [a["k"]])[-LAST_CLOSED:]
-    d["is_open"] = None
+    d["open"] = None
 
 
 def _real_prompt(o):
@@ -105,7 +105,7 @@ def _real_prompt(o):
 
 
 def _process_line(d, line, price, main_=False):
-    """ana=True (the main session file): a real user prompt starts a new turn (tur0 = cost closed so far) and sidechain lines are skipped."""
+    """main_=True (the main session file): a real user prompt starts a new turn (turn0 = cost closed so far) and sidechain lines are skipped."""
     try:
         o = json.loads(line)
     except ValueError:
@@ -114,7 +114,7 @@ def _process_line(d, line, price, main_=False):
         return
     if main_ and _real_prompt(o):
         _close(d, price)
-        d["tur0"] = d["usd"]
+        d["turn0"] = d["usd"]
         return
     if o.get("type") != "assistant" or o.get("isApiErrorMessage") or (main_ and o.get("isSidechain")):
         return
@@ -124,18 +124,18 @@ def _process_line(d, line, price, main_=False):
     model = m.get("model") or ""
     if not isinstance(model, str) or not model or model.startswith("<"):
         return
-    mid = AO.request_key(o, m)
+    mid = CP.request_key(o, m)
     if mid is None:
         return
-    kh = AO.key_summary(mid)
-    a = d["is_open"]
+    kh = CP.key_summary(mid)
+    a = d["open"]
     if a is None or a["k"] != kh:
         if kh in d["closed"]:
             return              # a response already counted, repeated later in the file
         _close(d, price)
-        a = d["is_open"] = AO.new_request(0.0, model, kh)
+        a = d["open"] = CP.new_request(0.0, model, kh)
     u = m.get("usage")
-    AO.merge_usage(a, u if isinstance(u, dict) else {})
+    CP.merge_usage(a, u if isinstance(u, dict) else {})
 
 
 def total(path, name=None):
@@ -147,7 +147,7 @@ def total(path, name=None):
 
 def turn_total(path, name):
     """API-price USD of the MAIN session's own responses since its last real user prompt (the last action; agents excluded:
-    they run in subagent files / sidechain lines and have their own rows). Incremental like toplam(); the first read of a long
+    they run in subagent files / sidechain lines and have their own rows). Incremental like total(); the first read of a long
     transcript starts at its last KUYRUK bytes. None when it cannot be computed."""
     r = _compute(path, "main-" + name, True, path)
     return None if r is None else r[1]
@@ -191,12 +191,12 @@ def _compute(path, name, main_, to_read=None):
                 _write_status(status_path, d)
             except OSError:      # e.g. Windows refuses os.replace while another refresh reads the file: recomputed next time
                 pass
-        a = d["is_open"]
-        is_open_usd = 0.0
+        a = d["open"]
+        open_usd = 0.0
         if a is not None:
-            usd, advler, _fz = AO.request_cost(price, AO.request_burn(dict(a, adv=list(a["adv"]))))
-            is_open_usd = (usd or 0.0) + sum(x for _m, x in advler)
-        return d["usd"] + is_open_usd, d["usd"] + is_open_usd - d.get("tur0", 0.0)
+            usd, advs, _unpriced = CP.request_cost(price, CP.request_burn(dict(a, adv=list(a["adv"]))))
+            open_usd = (usd or 0.0) + sum(x for _m, x in advs)
+        return d["usd"] + open_usd, d["usd"] + open_usd - d.get("turn0", 0.0)
     except Exception:
         return None
 

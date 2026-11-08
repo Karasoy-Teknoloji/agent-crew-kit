@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Quota calibration for cost: how many API-price dollars one percent of the WEEKLY limit is worth ("gerçek $").
+"""Quota calibration for cost: how many API-price dollars one percent of the WEEKLY limit is worth ("real $").
 
 Claude Code reports the weekly limit as an integer percent with every response; the status line logs a row to pace-history.csv
 whenever it changes (ts, week_used, five_hour_used, week_resets_at, ...). cost_core keeps per-UTC-minute API-price dollars of all
@@ -8,17 +8,17 @@ local transcripts ("min" buckets). This module joins the two, pure functions fir
 
   windows:  inside one limit week (same week_resets_at) the percent only counts when SEEN rising. Every rise is a point
             (time of the response that showed it, new level). A window runs from one point to the first later point that is at
-            least ADIM percentage points higher (integer rounding: one point is +-0.5 %, so a short window is noisy; with ADIM = 4
+            least STEP percentage points higher (integer rounding: one point is +-0.5 %, so a short window is noisy; with STEP = 4
             the rounding error is at most 25 % per window and cancels across windows). Windows do not overlap.
   ratio:    per window API $ spent locally in (start, end] / percentage points gained.
   robust:   median of the per-window ratios, drop windows outside [median/3, median*3] (percent that rose with almost no local
             spend = claude.ai web/desktop or another machine; local spend with almost no percent), the result is the sum of
-            dollars over the sum of points of the kept windows. Fewer than MIN_WINDOW kept windows = no result.
+            dollars over the sum of points of the kept windows. Fewer than MIN_WINDOWS kept windows = no result.
 
-gerçek $ of an agent = its API $ / (API $ per 100 %) x W, with W = plan price x 12 / 52 (what one limit week costs on the plan).
+real $ of an agent = its API $ / (API $ per 100 %) x W, with W = plan price x 12 / 52 (what one limit week costs on the plan).
 Plan price: pace-plan.json "plan_usd_monthly" > CLAUDE_SHARED_PLAN / ~/.config/claude-shared/plan (100|200) > the account tier in
-.credentials.json (only subscriptionType and rateLimitTier are read, nothing else) > unknown (then no "gerçek").
-Result file: <config dir>/cost/oran.json (0600), refreshed in the background by cost_core.refresh_status.
+.credentials.json (only subscriptionType and rateLimitTier are read, nothing else) > unknown (then no "real $").
+Result file: <config dir>/cost/ratio.json (0600), refreshed in the background by cost_core.refresh_status.
 """
 import csv
 import json
@@ -33,8 +33,8 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # python -I does not add the script directory
 
 STEP = 4              # minimum percentage points per window
-MIN_WINDOW = 4       # kept windows needed for a result
-DAY = 7               # only windows that ended in the last GUN days (older weeks can sit in another regime: other machines, web use, limit changes)
+MIN_WINDOWS = 4       # kept windows needed for a result
+DAYS = 7              # only windows that ended in the last DAYS days (older weeks can sit in another regime: other machines, web use, limit changes)
 FAKE_RESET = 4102444800   # placeholder reset time the status line may log (year 2100): not a real week
 CLAUDE = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 DIR = os.path.join(CLAUDE, "cost")
@@ -42,11 +42,11 @@ RATIO = os.path.join(DIR, "ratio.json")
 HISTORY = os.path.join(CLAUDE, "pace-history.csv")
 PLAN_FILE = os.path.join(CLAUDE, "pace-plan.json")
 TIER_PLAN = (("max_20x", 200), ("max_5x", 100))   # rateLimitTier substrings
-TIP_PLAN = {"pro": 20}                            # subscriptionType
+TYPE_PLAN = {"pro": 20}                            # subscriptionType
 
 
 def points(lines):
-    """satirlar: [(ts, week_used, week_resets_at)] -> {reset: [(ts, level)]}: per limit week the points where the level was seen
+    """lines: [(ts, week_used, week_resets_at)] -> {reset: [(ts, level)]}: per limit week the points where the level was seen
     to RISE (running maximum, so a stale lower value from an old session is ignored). The first row of a week is not a rise."""
     weeks = {}
     for ts, usage, reset in sorted(lines):
@@ -90,33 +90,33 @@ def usd(min_ts, min_usd, t0, t1):
     return sum(min_usd[a:b])
 
 
-def medyan(x):
+def median(x):
     s = sorted(x)
     n = len(s)
     return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
 
 
-def compute_ratio(lines, minutes, now=None, step=STEP, day=DAY, min_window=MIN_WINDOW):
-    """satirlar: [(ts, week_used, week_resets_at)]; dakika: {minute index: usd}. Returns a dict
-    {usd_per_pct, n, atilan, adim, medyan, window_day} or None when there is not enough data."""
+def compute_ratio(lines, minutes, now=None, step=STEP, days=DAYS, min_windows=MIN_WINDOWS):
+    """lines: [(ts, week_used, week_resets_at)]; minutes: {minute index: usd}. Returns a dict
+    {usd_per_pct, n, dropped, step, median, window_days} or None when there is not enough data."""
     now = time.time() if now is None else now
     ks = sorted(minutes)
     ku = [minutes[k] for k in ks]
-    ham = []
+    raw = []
     for t0, t1, score in windows(points(lines), step):
-        if t1 < now - day * 86400:
+        if t1 < now - days * 86400:
             continue
-        ham.append((usd(ks, ku, t0, t1), score))
-    if len(ham) < min_window:
+        raw.append((usd(ks, ku, t0, t1), score))
+    if len(raw) < min_windows:
         return None
-    med = medyan([d / p for d, p in ham])
+    med = median([d / p for d, p in raw])
     if med <= 0:
         return None
-    remaining = [(d, p) for d, p in ham if med / 3.0 <= d / p <= med * 3.0]
-    if len(remaining) < min_window:
+    remaining = [(d, p) for d, p in raw if med / 3.0 <= d / p <= med * 3.0]
+    if len(remaining) < min_windows:
         return None
-    return {"usd_per_pct": sum(d for d, _ in remaining) / sum(p for _, p in remaining), "n": len(remaining), "dropped": len(ham) - len(remaining),
-            "step": step, "medyan": med, "window_day": day}
+    return {"usd_per_pct": sum(d for d, _ in remaining) / sum(p for _, p in remaining), "n": len(remaining), "dropped": len(raw) - len(remaining),
+            "step": step, "median": med, "window_days": days}
 
 
 def _keychain_tier(config_dir=None):
@@ -145,7 +145,7 @@ def _keychain_tier(config_dir=None):
     try:
         os.makedirs(os.path.dirname(cache), exist_ok=True)
         with open(cache, "w", encoding="utf-8") as f:
-            f.write(("ok\n" if tier else "yok\n") + tier)
+            f.write(("ok\n" if tier else "none\n") + tier)
     except OSError:
         pass
     return tier
@@ -174,12 +174,12 @@ def plan_identity(config_dir=None):
             continue
     kt = None
     while True:
-        for tier, tip in sources:
+        for tier, kind in sources:
             for part, price in TIER_PLAN:
                 if part in tier:
                     return price
-            if tip in TIP_PLAN:
-                return TIP_PLAN[tip]
+            if kind in TYPE_PLAN:
+                return TYPE_PLAN[kind]
         if kt is not None:
             return None
         kt = _keychain_tier(cfg)
@@ -239,7 +239,7 @@ def minute_list(files):
 
 
 def refresh(files, now=None):
-    """Recompute and write oran.json from the scan. Keeps the previous file when there is not enough data yet."""
+    """Recompute and write ratio.json from the scan. Keeps the previous file when there is not enough data yet."""
     now = time.time() if now is None else now
     plan = plan_monthly()
     result = compute_ratio(read_history(), minute_list(files), now)
@@ -267,14 +267,14 @@ def refresh(files, now=None):
     return o
 
 
-def read_coefficient(now=None, en_old=3 * 86400):
-    """gerçek $ = API $ x katsayi. None when oran.json is missing, stale or has no result."""
+def read_coefficient(now=None, max_age=3 * 86400):
+    """real $ = API $ x coefficient. None when ratio.json is missing, stale or has no result."""
     now = time.time() if now is None else now
     try:
         with open(RATIO, encoding="utf-8") as f:
             o = json.load(f)
         k = o.get("coefficient")
-        if isinstance(k, (int, float)) and k > 0 and now - float(o.get("t") or 0) <= en_old:
+        if isinstance(k, (int, float)) and k > 0 and now - float(o.get("t") or 0) <= max_age:
             return float(k)
     except (OSError, ValueError, AttributeError):
         pass

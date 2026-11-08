@@ -132,8 +132,8 @@ class ParserAndPricing(unittest.TestCase):
         self.assertAlmostEqual(rec["model"]["claude-test-1"]["usd"], 0.044, places=6)
         self.assertAlmostEqual(rec["model"]["claude-adv-1"]["usd"], 0.00785, places=6)
         self.assertAlmostEqual(rec["usd"], 0.05185, places=6)
-        self.assertAlmostEqual(rec["dan"]["usd"], 0.00785, places=6)
-        self.assertEqual(rec["dan"]["n"], 1)
+        self.assertAlmostEqual(rec["adv"]["usd"], 0.00785, places=6)
+        self.assertEqual(rec["adv"]["n"], 1)
         day = self.cfg.json()["day"]["lines"][0]                       # the view rounds to 4 decimals
         self.assertAlmostEqual(day["usd"], 0.0519, places=4)
         self.assertEqual(day["advisor"]["n"], 1)
@@ -178,7 +178,7 @@ class ParserAndPricing(unittest.TestCase):
         self.assertAlmostEqual(day["usd"], 0.01, places=6)              # only the priced model costs anything
         self.assertEqual(day["unpriced_token"], 2001000)                # the rest is reported, not silently dropped
         out = self.cfg.run().stdout
-        self.assertIn("UYARI: 2.001.000 token fiyat tablosunda olmayan", out)
+        self.assertIn("WARNING: 2.001.000 tokens belong to a model that is not in the price table", out)
 
     def test_packaged_price_table_is_valid_and_documented(self):
         with open(AY.PRICE_PACKAGE, encoding="utf-8") as f:
@@ -217,9 +217,9 @@ class ParserAndPricing(unittest.TestCase):
             json.dump({"agentType": "reviewer", "description": "SECRET TEXT"}, f)
         day = self.cfg.json()["day"]["lines"][0]
         self.assertAlmostEqual(day["main"]["usd"], 1000 * 10 / 1e6, places=6)
-        self.assertAlmostEqual(day["alt"]["usd"], 8000 * 10 / 1e6, places=6)
-        self.assertIn("reviewer", day["turn"])
-        self.assertEqual(day["agent_pass_run"], 2)
+        self.assertAlmostEqual(day["sub"]["usd"], 8000 * 10 / 1e6, places=6)
+        self.assertIn("reviewer", day["type"])
+        self.assertEqual(day["agent_runs"], 2)
         raw = self.cfg.run("--json").stdout
         self.assertNotIn("SECRET TEXT", raw)                            # descriptions are never read into the output
 
@@ -252,7 +252,7 @@ class Aggregation(unittest.TestCase):
     def test_record_with_no_transcripts_does_not_crash(self):
         r = self.cfg.run("--save")                      # fresh install: nothing to record yet
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("0 gün", r.stdout)
+        self.assertIn("0 days", r.stdout)
         self.assertEqual(self.cfg.run("--refresh-status").returncode, 0)
 
     def test_recorded_history_survives_deleted_transcripts(self):
@@ -268,12 +268,12 @@ class Aggregation(unittest.TestCase):
         sh = now_ // 3600
         hour = {sh: 1.0, sh - 23: 2.0, sh - 24: 4.0, sh - 167: 8.0, sh - 168: 16.0, sh - 719: 32.0, sh - 720: 64.0}
         rec = {h: {"usd": v, "main": v, "alt": 0.0, "dan": 0.0, "model": {"claude-test-1": v}} for h, v in hour.items()}
-        P = {p["label"]: p for p in CK.compute_window({}, rec, now_=now_)}
+        P = {p["label"]: p for p in CK.compute_window({}, rec, now=now_)}
         # the window is the last N*24 hour buckets, current partial hour included: [sh-(24N-1), sh]
-        self.assertAlmostEqual(P["son 24sa"]["usd"], 1.0 + 2.0)
-        self.assertAlmostEqual(P["7g"]["usd"], 1 + 2 + 4 + 8)
-        self.assertAlmostEqual(P["30g"]["usd"], 1 + 2 + 4 + 8 + 16 + 32)
-        self.assertAlmostEqual(P["7g"]["main"]["usd"], 15.0)
+        self.assertAlmostEqual(P["last 24h"]["usd"], 1.0 + 2.0)
+        self.assertAlmostEqual(P["7d"]["usd"], 1 + 2 + 4 + 8)
+        self.assertAlmostEqual(P["30d"]["usd"], 1 + 2 + 4 + 8 + 16 + 32)
+        self.assertAlmostEqual(P["7d"]["main"]["usd"], 15.0)
 
     def test_window_start_is_completed_from_daily_totals(self):
         # hourly record starts at 2026-03-10 00:00 UTC; the day before has a daily total only ($24, no hourly buckets).
@@ -287,7 +287,7 @@ class Aggregation(unittest.TestCase):
         parts = cost.window_parts(1, sh, e, {h: r["usd"] for h, r in rec.items()}, {"2026-03-09": 24.0})
         self.assertEqual([p[:2] for p in parts if p[0] == "g"], [("g", "2026-03-09")])
         self.assertAlmostEqual([p[2] for p in parts if p[0] == "g"][0], 11 / 24)
-        P = CK.compute_window(days, rec, now_=now_)[0]
+        P = CK.compute_window(days, rec, now=now_)[0]
         self.assertAlmostEqual(P["usd"], 13.0 + 11.0)                 # 13 recorded hours + 11/24 of the day total
         self.assertAlmostEqual(P["completed_usd"], 11.0)
         # the same window without any daily total invents nothing
@@ -301,18 +301,18 @@ class Aggregation(unittest.TestCase):
             self.cfg.transcript("p", "s%d" % i, [asst(now - age_h * 3600, "m%d" % i, inp=inp)])
         r = self.cfg.run("--window")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertRegex(r.stdout, r"son 24sa\s+\$12,00")
-        self.assertRegex(r.stdout, r"7g\s+\$42,00")
-        self.assertRegex(r.stdout, r"30g\s+\$142,00")
+        self.assertRegex(r.stdout, r"last 24h\s+\$12,00")
+        self.assertRegex(r.stdout, r"7d\s+\$42,00")
+        self.assertRegex(r.stdout, r"30d\s+\$142,00")
         self.assertEqual(self.cfg.run("--save").returncode, 0)
-        # status line fast path: exactly as statusline.sh calls it, reads durum.cache only
+        # status line fast path: exactly as statusline.sh calls it, reads status.cache only
         s = self.cfg.run("--status", flags=("-S", "-E"))
         self.assertEqual(s.returncode, 0, s.stderr)
-        self.assertEqual(s.stdout, "son 24sa $12 · 7g $42 · 30g $142 · API eşdeğeri (fatura değil)")
+        self.assertEqual(s.stdout, "last 24h $12 · 7d $42 · 30d $142 · API equivalent (not a bill)")
 
     def test_status_line_refreshes_in_background(self):
         # no cache: prints nothing at once and does not scan itself; starts one detached refresh (python only: no flock/nice
-        # binary, so macOS works too) that writes durum.cache
+        # binary, so macOS works too) that writes status.cache
         self.cfg.transcript("p", "s", [asst(time.time() - 3600, "a", inp=1_200_000)])
         t0 = time.time()
         s = self.cfg.run("--status", flags=("-S", "-E"))
@@ -323,10 +323,10 @@ class Aggregation(unittest.TestCase):
             if os.path.isfile(cache):
                 break
             time.sleep(0.25)
-        self.assertTrue(os.path.isfile(cache), "background refresh did not produce durum.cache")
+        self.assertTrue(os.path.isfile(cache), "background refresh did not produce status.cache")
         time.sleep(1)                                              # let the child release its lock
         s = self.cfg.run("--status", flags=("-S", "-E"))
-        self.assertEqual(s.stdout, "son 24sa $12 · 7g $12 · 30g $12 · API eşdeğeri (fatura değil)")   # UTF-8 bytes whatever the console code page is
+        self.assertEqual(s.stdout, "last 24h $12 · 7d $12 · 30d $12 · API equivalent (not a bill)")   # UTF-8 bytes whatever the console code page is
 
     def test_refresh_lock_is_exclusive(self):
         os.makedirs(os.path.join(self.cfg.dir, "cost"), exist_ok=True)
@@ -428,8 +428,8 @@ class Deduplication(unittest.TestCase):
         self.assertEqual(d["request"], 3)
         self.assertAlmostEqual(d["usd"], (100000 + 200000 + 300000) * 10 / 1e6 + 1000 * 50 / 1e6, places=6)
         self.assertAlmostEqual(d["main"]["usd"], d["usd"], places=6)
-        self.assertEqual(d["alt"]["usd"], 0)
-        self.assertEqual({x["id"]: round(x["usd"], 6) for x in d["en_session"]}, {"orig": 3.05, "resumed": 3.0})   # history -> the original session
+        self.assertEqual(d["sub"]["usd"], 0)
+        self.assertEqual({x["id"]: round(x["usd"], 6) for x in d["top_sessions"]}, {"orig": 3.05, "resumed": 3.0})   # history -> the original session
 
     def test_result_does_not_depend_on_file_names_or_cache_state(self):
         t = self.T
@@ -439,7 +439,7 @@ class Deduplication(unittest.TestCase):
         self.cfg.transcript("p", "aaa-resumed", hist + [asst(t + 900, "c", inp=100000)])
         self.assertAlmostEqual(self.day()["usd"], 4.0, places=6)                 # copy appears later: cache must not double count
         self.assertAlmostEqual(self.day()["usd"], 4.0, places=6)                 # and a cached rerun is stable
-        r = self.cfg.run("--json", "--cache-missing")
+        r = self.cfg.run("--json", "--no-cache")
         self.assertEqual(json.loads(r.stdout)["day"]["lines"][0]["usd"], self.day()["usd"])
         os.remove(os.path.join(self.cfg.dir, "projects", "p", "zzz-orig.jsonl"))   # the original is deleted: the copy takes over
         self.assertAlmostEqual(self.day()["usd"], 4.0, places=6)
@@ -454,8 +454,8 @@ class Deduplication(unittest.TestCase):
         self.cfg.transcript("p", "s2", ag, sub=os.path.join("workflows", "wf1", "agent-aaa.jsonl"))      # workflow copy
         d = self.day()
         self.assertAlmostEqual(d["main"]["usd"], 2.0, places=6)    # m1 once, m2
-        self.assertAlmostEqual(d["alt"]["usd"], 1.5, places=6)    # x1 + x2 once
-        self.assertEqual(d["agent_pass_run"], 1)                       # three copies of one agent file = one run
+        self.assertAlmostEqual(d["sub"]["usd"], 1.5, places=6)    # x1 + x2 once
+        self.assertEqual(d["agent_runs"], 1)                       # three copies of one agent file = one run
         self.assertEqual(d["request"], 4)
 
     def test_fork_agent_does_not_recount_the_parent_history(self):
@@ -467,7 +467,7 @@ class Deduplication(unittest.TestCase):
             json.dump({"agentType": "fork"}, f)
         d = self.day()
         self.assertAlmostEqual(d["main"]["usd"], 2.0, places=6)    # the main conversation keeps its own history
-        self.assertAlmostEqual(d["alt"]["usd"], 1.0, places=6)    # the fork only its new response
+        self.assertAlmostEqual(d["sub"]["usd"], 1.0, places=6)    # the fork only its new response
 
     def test_again_recomputes_days_with_transcripts_and_keeps_deleted_ones(self):
         t = self.T
@@ -510,16 +510,16 @@ class Deduplication(unittest.TestCase):
         self.cfg.transcript("p", "resumed", hist, sub="agent-z.jsonl")
         def views(*a):
             d = json.loads(self.cfg.run("--json", *a).stdout)
-            return {k: d[k] for k in ("day", "week", "ay", "year")}
+            return {k: d[k] for k in ("day", "week", "month", "year")}
         first = views()
         second = views()                                    # served from the file cache
-        third = views("--cache-missing")
+        third = views("--no-cache")
         self.assertEqual(first, second)
         self.assertEqual(first, third)
 
 
-class SonWindowFloor(unittest.TestCase):
-    """The "son <süre>" window of the status line is at least LAST_MIN_SEC long."""
+class LastWindowFloor(unittest.TestCase):
+    """The "last <duration>" window of the status line is at least LAST_MIN_SEC long."""
 
     def test_short_window_reaches_back(self):
         d = tempfile.mkdtemp()
@@ -548,43 +548,43 @@ class Views(unittest.TestCase):
     def test_daily_weekly_monthly_yearly_grouping(self):
         self.assertEqual(self.keys("day"), [("2025-12-30", 1.0), ("2026-01-02", 2.0)])
         self.assertEqual(self.keys("week"), [("2026-W01", 3.0)])
-        self.assertEqual(self.keys("ay"), [("2025-12", 1.0), ("2026-01", 2.0)])
+        self.assertEqual(self.keys("month"), [("2025-12", 1.0), ("2026-01", 2.0)])
         self.assertEqual(self.keys("year"), [("2025", 1.0), ("2026", 2.0)])
 
     def test_cli_views_print_only_the_requested_view(self):
-        for flag, expect, absent in (("--day", "30.12 Sal", "AY GÖRÜNÜMÜ"), ("--week", "2026-W01", "GÜN GÖRÜNÜMÜ"),
-                                      ("--ay", "2025-12", "HAFTA GÖRÜNÜMÜ"), ("--year", "2025", "AY GÖRÜNÜMÜ")):
+        for flag, expect, absent in (("--day", "30.12 Tue", "MONTH VIEW"), ("--week", "2026-W01", "DAY VIEW"),
+                                      ("--month", "2025-12", "WEEK VIEW"), ("--year", "2025", "MONTH VIEW")):
             r = self.cfg.run(flag)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertIn(expect, r.stdout)
             self.assertNotIn(absent, r.stdout)
-            self.assertIn("EN PAHALI 10 OTURUM", r.stdout)
+            self.assertIn("10 MOST EXPENSIVE SESSIONS", r.stdout)
         r = self.cfg.run("--day", "--last", "1")
-        self.assertIn("02.01 Cum", r.stdout)
+        self.assertIn("02.01 Fri", r.stdout)
         self.assertNotIn("30.12", r.stdout)
 
     def test_summary_hides_empty_sections(self):
         # all data is months old: nothing for today, nothing in the last 7 days / 4 weeks, no window with spending
         r = self.cfg.run()
         self.assertEqual(r.returncode, 0, r.stderr)
-        for hidden in ("BUGÜN", "SON 7 GÜN", "SON 4 HAFTA", "KAYAN PENCERELER", "modeller: -", "henüz kayıtlı istek yok"):
+        for hidden in ("TODAY", "LAST 7 DAYS", "LAST 4 WEEKS", "ROLLING WINDOWS", "models: -", "no requests recorded yet"):
             self.assertNotIn(hidden, r.stdout, hidden)
-        for shown in ("AYLAR", "YILLAR", "EN PAHALI 10 OTURUM"):
+        for shown in ("MONTHS", "YEARS", "10 MOST EXPENSIVE SESSIONS"):
             self.assertIn(shown, r.stdout)
 
     def test_summary_shows_today_when_there_is_data(self):
         self.cfg.transcript("p", "today", [asst(time.time() - 1, "t", inp=100000)])
         r = self.cfg.run()
-        for shown in ("KAYAN PENCERELER", "BUGÜN", "SON 7 GÜN", "SON 4 HAFTA", "AYLAR", "YILLAR"):
+        for shown in ("ROLLING WINDOWS", "TODAY", "LAST 7 DAYS", "LAST 4 WEEKS", "MONTHS", "YEARS"):
             self.assertIn(shown, r.stdout, shown)
 
     def test_no_data_at_all(self):
         empty = Cfg()
         r = empty.run()
         self.assertEqual(r.returncode, 0)
-        self.assertTrue(r.stdout.startswith("Veri yok"), r.stdout)
-        for flag in ("--day", "--week", "--ay", "--year"):
-            self.assertIn("Veri yok.", empty.run(flag).stdout)
+        self.assertTrue(r.stdout.startswith("No data"), r.stdout)
+        for flag in ("--day", "--week", "--month", "--year"):
+            self.assertIn("No data.", empty.run(flag).stdout)
         self.assertEqual(empty.run("--window").returncode, 0)
         self.assertEqual(empty.json()["day"]["lines"], [])
 
@@ -608,7 +608,7 @@ class Views(unittest.TestCase):
 class PersonalDataGuard(unittest.TestCase):
     def test_no_machine_specific_strings_in_shipped_files(self):
         plug = os.path.normpath(os.path.join(HERE, ".."))
-        bad = ["/home/", "example-user", "example-host", "olcum/fiyatlar"]
+        bad = ["/home/", "example-user", "example-host", "olcum/fiyatlar"]   # a private measurement path name (kept as the string it guards against)
         for sub in ("bin", "systemd"):
             for root, _, files in os.walk(os.path.join(plug, sub)):
                 if "__pycache__" in root:
@@ -635,7 +635,7 @@ class WarningTest(unittest.TestCase):
     def test_warning_without_stderr_does_not_raise(self):
         from unittest import mock
         with mock.patch.object(sys, "stderr", None):
-            CK._warning("UYARI: deneme\n")
+            CK._warning("WARNING: test\n")
 
     def test_warning_reaches_stderr_and_the_run_log(self):
         import io
@@ -648,9 +648,9 @@ class WarningTest(unittest.TestCase):
         lg.addHandler(h)
         self.addCleanup(lg.removeHandler, h)
         with mock.patch.object(sys, "stderr", io.StringIO()) as err:
-            CK._warning("UYARI: deneme\n")
-        self.assertEqual(err.getvalue(), "UYARI: deneme\n")
-        self.assertEqual([r.getMessage() for r in record], ["UYARI: deneme"])
+            CK._warning("WARNING: test\n")
+        self.assertEqual(err.getvalue(), "WARNING: test\n")
+        self.assertEqual([r.getMessage() for r in record], ["WARNING: test"])
 
 
 if __name__ == "__main__":
