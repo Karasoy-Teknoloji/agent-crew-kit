@@ -1,4 +1,4 @@
-"""Burn mode in the status line: " | BURN" (statusline.ps1 / statusline.sh) while ~/.claude/last-window/bitir.json says it is on and its
+"""Burn mode in the status line: " | BURN" (statusline.ps1 / statusline.sh) while ~/.claude/last-window/burn.json says it is on and its
 stored weekly reset has not passed.
 
 Run:  python3 -I -m unittest discover -s plugins/quota-pace/tests     (from the repo root)

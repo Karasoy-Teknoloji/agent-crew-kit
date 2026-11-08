@@ -44,13 +44,13 @@ class Base:
     def test_live_session_writes(self):
         self.registry("live-1")
         out = self.run_status(payload("live-1"))
-        self.assertIn("hafta %63", out)
+        self.assertIn("week 63%", out)
         self.assertEqual(self.written(), {"pace.json": True, "pace-history.csv": True, "statusline-input.json": True})
 
     def test_unregistered_session_renders_but_writes_nothing(self):
         self.registry("live-1")
         out = self.run_status(payload("sess-fixture-0001"))
-        self.assertIn("hafta %63", out)                                  # still shown to whoever asked
+        self.assertIn("week 63%", out)                                  # still shown to whoever asked
         self.assertEqual(self.written(), {"pace.json": False, "pace-history.csv": False, "statusline-input.json": False})
 
     def test_missing_session_id_is_not_live_when_a_registry_exists(self):

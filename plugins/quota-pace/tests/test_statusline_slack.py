@@ -38,7 +38,7 @@ class Scratch(unittest.TestCase):
         with open(self.inbox, "w", encoding="utf-8", newline="") as f:
             f.write("".join(lines))
         if offset is not None:
-            with open(self.inbox + ".okundu", "w") as f:
+            with open(self.inbox + ".seen", "w") as f:
                 f.write(str(offset))
 
     def check(self, render):
@@ -46,16 +46,16 @@ class Scratch(unittest.TestCase):
         self.write_inbox([])
         self.assertNotIn("Slack:", render())                                  # empty file
         self.write_inbox(ITEMS[:2])
-        self.assertIn(" | Slack: 2 yeni", render())                           # two unread
+        self.assertIn(" | Slack: 2 new", render())                           # two unread
         self.write_inbox(ITEMS, offset=len(ITEMS[0].encode()) + len(ITEMS[1].encode()))
-        self.assertIn(" | Slack: 1 yeni", render())                           # offset skips the read ones
+        self.assertIn(" | Slack: 1 new", render())                           # offset skips the read ones
         self.write_inbox(ITEMS, offset=sum(len(i.encode()) for i in ITEMS))
         self.assertNotIn("Slack:", render())                                  # all read
         self.write_inbox(ITEMS, offset=10**9)
         self.assertNotIn("Slack:", render())                                  # stale offset beyond the end
-        with open(self.inbox + ".okundu", "w") as f:
+        with open(self.inbox + ".seen", "w") as f:
             f.write("garbage")
-        self.assertIn(" | Slack: 3 yeni", render())                           # unreadable offset = from the start
+        self.assertIn(" | Slack: 3 new", render())                           # unreadable offset = from the start
 
 
 @unittest.skipUnless(PWSH, "needs PowerShell")
@@ -95,7 +95,7 @@ class HookEntries(Scratch):
         self.assertEqual(cfg["hooks"]["UserPromptSubmit"], [{"hooks": [pace]}])
 
     def test_hook_command_is_silent_without_the_add_on(self):
-        """agent-crew-kit does not ship tools/slack-triage/gelen.py: the hook must exit 0 and print nothing, even with unread items."""
+        """agent-crew-kit does not ship tools/slack-triage/inbox.py: the hook must exit 0 and print nothing, even with unread items."""
         cfg = {}
         install_common.merge_slack_inbox(cfg, sys.executable, True)
         h = cfg["hooks"]["UserPromptSubmit"][0]["hooks"][0]

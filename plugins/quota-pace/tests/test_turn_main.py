@@ -1,5 +1,5 @@
 """Last action of the status line = the MAIN session's own responses since its last real prompt (agents excluded), and the first
-window 'son Ndk' = the total_cost_usd delta since the prompt boundary (main + agents).
+window 'last Nm' = the total_cost_usd delta since the prompt boundary (main + agents).
 Run with the other plugin tests:  python3 -I -m unittest discover -s plugins/quota-pace/tests"""
 import json
 import os
@@ -41,8 +41,8 @@ class TurAna(unittest.TestCase):
                 shutil.copy(os.path.join(BIN, f), os.path.join(c, "bin", f))
         for f in ("hidden.py", "hidden_loader.py", "runlog.py"):      # a copy install ships these next to the scripts (install_common FILES)
             shutil.copy(os.path.join(BIN, "..", "..", "..", "tools", f), os.path.join(c, "bin", f))
-        with open(os.path.join(c, "cost", "install.json"), "w") as f:
-            json.dump({"install": 50.0}, f)
+        with open(os.path.join(c, "cost", "fx.json"), "w") as f:
+            json.dump({"rate": 50.0}, f)
         with open(os.path.join(c, "cost", "ratio.json"), "w") as f:
             json.dump({"t": 4102444800, "coefficient": 0.1}, f)          # far future "t": always fresh
         self.tr = os.path.join(c, "sess.jsonl")
@@ -77,14 +77,14 @@ class TurAna(unittest.TestCase):
         self.write(user("a"), asst("m1", 1_000_000))
         self.assertNotIn("last", self.render("p1", 5.0)[0])                   # first sighting: no baseline
         self.assertNotIn("last", self.render("p1", 5.0)[0])                   # nothing spent since the boundary
-        self.assertRegex(self.render("p2", 8.0)[0].split(" · ")[0], r"^son \d+sn ₺150 \(₺15,00\)$")  # +$3 incl. agents, whatever the transcript says; seconds in the first minute (the rolling windows follow after ' · ')
+        self.assertRegex(self.render("p2", 8.0)[0].split(" · ")[0], r"^last \d+s ₺150 \(₺15,00\)$")  # +$3 incl. agents, whatever the transcript says; seconds in the first minute (the rolling windows follow after ' · ')
         self.assertEqual(self.render("p2", 8.0)[2], "₺200 (₺20,00)")          # the clock amount is main-only: the transcript's last turn is $4
 
     def test_last_min_label_style(self):
         sys.path.insert(0, BIN)
         import cost
-        self.assertEqual([cost.sure_tr(s) for s in (0, 45, 59, 60, 7 * 60 + 5, 3599, 3600, 80 * 60, 4 * 3600 + 23 * 60)],
-                         ["0sn", "45sn", "59sn", "1dk", "7dk", "59dk", "1sa0dk", "1sa20dk", "4sa23dk"])
+        self.assertEqual([cost.elapsed_str(s) for s in (0, 45, 59, 60, 7 * 60 + 5, 3599, 3600, 80 * 60, 4 * 3600 + 23 * 60)],
+                         ["0s", "45s", "59s", "1m", "7m", "59m", "1h0m", "1h20m", "4h23m"])
 
 
 if __name__ == "__main__":

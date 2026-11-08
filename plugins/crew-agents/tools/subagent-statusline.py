@@ -108,9 +108,9 @@ def cost_parts(task, transcript_path, tools, factor):
         usd = incremental.total(path, "agent-%s" % task.get("id")) if path else None
         if usd is None:
             return []
-        txt = cost.para(usd)
+        txt = cost.money(usd)
         if factor:
-            txt += " (%s)" % cost.para(usd * factor)
+            txt += " (%s)" % cost.money(usd * factor)
         return [txt]
     except Exception:
         return []

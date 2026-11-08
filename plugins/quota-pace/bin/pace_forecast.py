@@ -698,7 +698,7 @@ def monte_carlo(week_used, rate, rate_source, resolved_segments, samples_by_week
     return p10, p50, p90, active_hours_left
 
 
-TR_DAYS = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]   # fixed names, never the locale's %a
 
 
 def runout_time(now, reset, used, p50, day_hours, hour_share_for, persist_weight):
@@ -733,8 +733,8 @@ def runout_fields(runout, reset, now_local):
         return {"runout_at": None, "idle_min": None, "runout_label": None, "idle_label": None}
     idle = max(0, int(round((reset - runout) / 60.0)))
     lt = to_local(runout)
-    label = lt.strftime("%H:%M") if lt.date() == now_local.date() else "%s %s" % (TR_DAYS[lt.weekday()], lt.strftime("%H:%M"))
-    idle_label = "%ddk" % idle if idle < 60 else ("%dsa" % (idle // 60) + ("%ddk" % (idle % 60) if idle % 60 else ""))
+    label = lt.strftime("%H:%M") if lt.date() == now_local.date() else "%s %s" % (DAYS[lt.weekday()], lt.strftime("%H:%M"))
+    idle_label = "%dm" % idle if idle < 60 else ("%dh" % (idle // 60) + ("%dm" % (idle % 60) if idle % 60 else ""))
     return {"runout_at": int(runout), "idle_min": idle, "runout_label": label, "idle_label": idle_label}
 
 
@@ -1222,8 +1222,8 @@ def _case_k():
     f = runout_fields(even, reset, to_local(now))
     tomorrow = runout_fields(now + 86400 + 3600, now + 86400 + 3600 + 5400, to_local(now))
     ok = (abs(even - (now + 105 * 60)) < 1 and under is None and over == now
-          and f["runout_label"] == "20:45" and f["idle_min"] == 15 and f["idle_label"] == "15dk"
-          and tomorrow["runout_label"] == "Pzt 20:00" and tomorrow["idle_label"] == "1sa30dk")
+          and f["runout_label"] == "20:45" and f["idle_min"] == 15 and f["idle_label"] == "15m"
+          and tomorrow["runout_label"] == "Mon 20:00" and tomorrow["idle_label"] == "1h30m")
     return ok, "" if ok else "even=%r f=%r tomorrow=%r" % (even, f, tomorrow)
 
 

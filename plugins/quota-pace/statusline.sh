@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Claude Code status line: model · effort | %ctx (used/size) | HH:MM | [branch] dir
+# Claude Code status line: model · effort | ctx% (used/size) | HH:MM | [branch] dir
 d=$(cat)
 # Sibling scripts sit in bin/ next to this file: ~/.claude/bin for the copied install, plugins/quota-pace/bin when run from the
-# claude-shared clone (install.sh --repodan). Runtime data (pace.json, history, cost/) always stays under ~/.claude.
+# claude-shared clone (install.sh --direct). Runtime data (pace.json, history, cost/) always stays under ~/.claude.
 case "${BASH_SOURCE[0]}" in */*) kt="${BASH_SOURCE[0]%/*}" ;; *) kt=. ;; esac
 # Live-session guard (same rule as statusline.ps1): only a payload from a live Claude Code session may write the live state. ~/.claude/sessions/<pid>.json
 # lists the live sessions; a payload whose session_id is not in it (test fixture, benchmark against the real profile) is rendered but writes nothing.
 # No registry, or none with a sessionId = cannot judge = write as before. Incident 05.11.2026: a fixture run made the pace hook say "TIGHT, 63%" at a real 54%.
-canli=1
+live=1
 if grep -qs '"sessionId"' ~/.claude/sessions/*.json 2>/dev/null; then
   sid=$(jq -r '.session_id // empty' <<<"$d" 2>/dev/null)
-  case "$sid" in ''|*[!A-Za-z0-9_-]*) canli=0 ;; *) grep -qsE "\"sessionId\" *: *\"$sid\"" ~/.claude/sessions/*.json 2>/dev/null || canli=0 ;; esac
+  case "$sid" in ''|*[!A-Za-z0-9_-]*) live=0 ;; *) grep -qsE "\"sessionId\" *: *\"$sid\"" ~/.claude/sessions/*.json 2>/dev/null || live=0 ;; esac
 fi
 # Debug aid (kept permanently): the last stdin JSON Claude Code sent, ~/.claude/statusline-input.json (0600, overwritten, atomic)
 [ "$live" = 1 ] && ( umask 077; printf '%s' "$d" > ~/.claude/statusline-input.json.tmp$$ && mv -f ~/.claude/statusline-input.json.tmp$$ ~/.claude/statusline-input.json ) 2>/dev/null
@@ -37,24 +37,24 @@ if [ -n "$pct" ]; then
   size=${size%.*}
   if [[ "$acw" =~ ^[0-9]+$ ]] && [ "$acw" -gt 0 ] && { [ -z "$size" ] || [ "$acw" -lt "$size" ]; }; then size=$acw; fi
   pct=$(awk -v u="$used" -v s="${size:-0}" 'BEGIN{ if (s>0) printf "%.0f", 100*u/s; else print 0 }')
-  out+=" | %$pct ($(fmt "$used")/$(fmt "${size:-0}"))"
+  out+=" | $pct% ($(fmt "$used")/$(fmt "${size:-0}"))"
 fi
 # Optional cost statistics switch (see the "Optional cost statistics" block at the end): off unless bin/cost.py exists next to this file;
-# COST_STATUS=0 or the file ~/.claude/cost/kapali turns it off without uninstalling.
-mal=0
-if [ -f "$kt/bin/cost.py" ] && [ "${COST_STATUS:-1}" != 0 ] && [ ! -e ~/.claude/cost/kapali ]; then mal=1; fi
+# COST_STATUS=0 or the file ~/.claude/cost/off turns it off without uninstalling.
+cost_on=0
+if [ -f "$kt/bin/cost.py" ] && [ "${COST_STATUS:-1}" != 0 ] && [ ! -e ~/.claude/cost/off ]; then cost_on=1; fi
 # "session" (session total) and the last action's cost come from one `cost.py --status --input` call (it reads this JSON from stdin,
-# keeps the per-prompt baseline and formats the amounts in lira; line 1 is also the "son 24sa" string). Plain Python, no extra tools.
-malsatir=()
-if [ "$mal" = 1 ]; then
+# keeps the per-prompt baseline and formats the amounts in lira; line 1 is also the "last 24h" string). Plain Python, no extra tools.
+costline=()
+if [ "$cost_on" = 1 ]; then
   i=0
-  while IFS= read -r l || [ -n "$l" ]; do malsatir[$i]="$l"; i=$((i + 1)); done < <(printf '%s' "$d" | python3 -S -E "$kt/bin/cost.py" --status --input 2>/dev/null)
+  while IFS= read -r l || [ -n "$l" ]; do costline[$i]="$l"; i=$((i + 1)); done < <(printf '%s' "$d" | python3 -S -E "$kt/bin/cost.py" --status --input 2>/dev/null)
 fi
 # HH:MM of an epoch in local time, portable (GNU `date -d @N` is not available on macOS/BSD; python3 is already required)
 hhmm() { python3 -S -E -c 'import sys,time;sys.stdout.write(time.strftime("%H:%M",time.localtime(int(sys.argv[1]))))' "$1" 2>/dev/null; }
 out+=" | $(date +%H:%M)"
 # QUOTA_OPERATION_AMOUNT=0 hides the last action's amounts after the clock (personal preference, default shown)
-[ "${QUOTA_OPERATION_AMOUNT:-1}" != 0 ] && [ -n "${malsatir[2]:-}" ] && out+=" ${malsatir[2]}"
+[ "${QUOTA_OPERATION_AMOUNT:-1}" != 0 ] && [ -n "${costline[2]:-}" ] && out+=" ${costline[2]}"
 # Quota pace: where the weekly limit lands at the forecast target (reset minus PACE_TARGET_HOURS hours, default 5; 0 = the reset) -> PLENTY/NORMAL/TIGHT, written to pace.json for the hook. The mode is weekly only; the 5-hour window is displayed, never part of it.
 # bin/pace_forecast.py gives the median and a P10-P90 range from the active rate and the remaining work hours;
 # used / share of the week elapsed is the fallback while there is no fresh forecast.
@@ -115,10 +115,10 @@ if [ -n "$pace" ]; then
   # ~/.claude/cost/share-following, whose mtime is the next due time (the job re-aims it after every check from
   # share_interval_hour in pace-plan.json, default 2 h); only a joined machine (--share wrote ~/.config/claude-shared/plan) and only
   # when it is due do we look further (the lock: a share still running, younger than 30 min, means wait). Detached, never waited for.
-  if [ "$mal" = 1 ] && [ "${QUOTA_SHARE_AUTO:-1}" != 0 ] && [ -f "$kt/bin/cost_share.py" ]; then
+  if [ "$cost_on" = 1 ] && [ "${QUOTA_SHARE_AUTO:-1}" != 0 ] && [ -f "$kt/bin/cost_share.py" ]; then
     due=$(stat -c %Y ~/.claude/cost/share-following 2>/dev/null || stat -f %m ~/.claude/cost/share-following 2>/dev/null || echo 0)
     if [ "$due" -le "$nowts" ] && [ -f ~/.config/claude-shared/plan ]; then
-      plock=$(stat -c %Y ~/.claude/cost/paylas.lock 2>/dev/null || stat -f %m ~/.claude/cost/paylas.lock 2>/dev/null || echo 0)
+      plock=$(stat -c %Y ~/.claude/cost/share.lock 2>/dev/null || stat -f %m ~/.claude/cost/share.lock 2>/dev/null || echo 0)
       if [ "$plock" = 0 ] || [ $(( nowts - plock )) -ge 1800 ]; then
         if command -v setsid >/dev/null; then
           (setsid nohup python3 -E "$kt/bin/cost.py" --share --automatic </dev/null >/dev/null 2>&1 &)
@@ -130,7 +130,7 @@ if [ -n "$pace" ]; then
   fi
   fi
   r5=$(jq -r '.five_hour_resets_at // 0 | floor' <<<"$pace")
-  # 5-hour forecast: projected % at the reset ("→P") or the time the limit runs out ("→bitiş HH:MM"), from the
+  # 5-hour forecast: projected % at the reset ("→P%") or the time the limit runs out ("→out HH:MM"), from the
   # current window's history rows (10-60 min old) or the window average; empty when there is nothing to project
   f5=''
   if [ "$r5" -gt 0 ] && [ $(( r5 - nowts )) -gt 0 ] && [ "$(jq -r '.five_hour_used == null' <<<"$pace")" = false ]; then
@@ -144,32 +144,32 @@ if [ -n "$pace" ]; then
         if (p >= 100) printf "B %d\n", now + (100-u)/rate; else printf "P %d\n", int(p)
       }')
     case "$fc5" in
-      P\ *) f5="→%${fc5#P }" ;;
-      B\ *) f5="→bitiş $(hhmm "${fc5#B }")" ;;
+      P\ *) f5="→${fc5#P }%" ;;
+      B\ *) f5="→out $(hhmm "${fc5#B }")" ;;
     esac
   fi
-  if [ "$r5" -gt 0 ]; then l=$(( r5 - nowts )); [ $l -lt 0 ] && l=0; h=$((l/3600)); m=$((l%3600/60)); [ $h -gt 0 ] && r5=" (${h}sa${m}dk)" || r5=" (${m}dk)"; else r5=''; fi
+  if [ "$r5" -gt 0 ]; then l=$(( r5 - nowts )); [ $l -lt 0 ] && l=0; h=$((l/3600)); m=$((l%3600/60)); [ $h -gt 0 ] && r5=" (${h}h${m}m)" || r5=" (${m}m)"; else r5=''; fi
   # past 100%: when the limit runs out and how long it stays empty before the reset
-  # The 5sa segment is shown only while Claude Code reports a 5-hour window (five_hour_used null = not reported -> segment dropped)
-  out+=" | $(jq -r '(if .five_hour_used != null then "5sa %\(.five_hour_used|floor)'"$f5$r5"' · " else "" end) + "hafta %\(.week_used|floor)→\(if .runout_label then "bitiş \(.runout_label) (\(.idle_label) boş)" else "%\(.week_projected)\(if .p10 != null then ((((.p90 - .p10) / 2 + 0.5) | floor) as $h | if $h >= 1 then "±\($h)" else "" end) else "" end)" end) \({"PLENTY": "🟢", "NORMAL": "🟡", "TIGHT": "🔴"}[.mode] // .mode)"' <<<"$pace")"
+  # The 5h segment is shown only while Claude Code reports a 5-hour window (five_hour_used null = not reported -> segment dropped)
+  out+=" | $(jq -r '(if .five_hour_used != null then "5h \(.five_hour_used|floor)%'"$f5$r5"' · " else "" end) + "week \(.week_used|floor)%→\(if .runout_label then "out \(.runout_label) (\(.idle_label) empty)" else "\(.week_projected)%\(if .p10 != null then ((((.p90 - .p10) / 2 + 0.5) | floor) as $h | if $h >= 1 then "±\($h)" else "" end) else "" end)" end) \({"PLENTY": "🟢", "NORMAL": "🟡", "TIGHT": "🔴"}[.mode] // .mode)"' <<<"$pace")"
 fi
 # folder: ~ for $HOME, shortened to ~/... below it
 case "$dir" in
   "$HOME"|"$HOME/") dir="~" ;;
   "$HOME"/*) dir="~/${dir#"$HOME"/}" ;;
 esac
-# Slack inbox (tools/slack-triage/gelen.py, install --slack-inbox): " | Slack: N yeni" while unread items wait. Reads the inbox file and its
-# .okundu byte offset directly (no Python spawn, no network, at most 256 KB); a missing file or any error shows nothing.
+# Slack inbox (tools/slack-triage/inbox.py, install --slack-inbox): " | Slack: N new" while unread items wait. Reads the inbox file and its
+# .seen byte offset directly (no Python spawn, no network, at most 256 KB); a missing file or any error shows nothing.
 sg="${SLACK_INBOX_INBOX:-$HOME/.claude/slack-inbox.jsonl}"
 if [ -s "$sg" ]; then
-  sgo=$(cat "$sg.okundu" 2>/dev/null); case "$sgo" in ''|*[!0-9]*) sgo=0 ;; esac
+  sgo=$(cat "$sg.seen" 2>/dev/null); case "$sgo" in ''|*[!0-9]*) sgo=0 ;; esac
   sgn=$(tail -c +$((sgo + 1)) "$sg" 2>/dev/null | head -c 262144 | grep -c '[^[:space:]]')
-  [ "${sgn:-0}" -gt 0 ] 2>/dev/null && out+=" | Slack: $sgn yeni"
+  [ "${sgn:-0}" -gt 0 ] 2>/dev/null && out+=" | Slack: $sgn new"
 fi
 # Burn mode (last-window burn --on): " | BURN" while it is on and its weekly reset has not passed (same rule as statusline.ps1)
-bf="$HOME/.claude/last-window/bitir.json"
+bf="$HOME/.claude/last-window/burn.json"
 if [ -s "$bf" ]; then
-  bhr=$(jq -r 'if .aktif == true then (.week_reset // 0 | floor) else 0 end' "$bf" 2>/dev/null)
+  bhr=$(jq -r 'if .active == true then (.week_reset // 0 | floor) else 0 end' "$bf" 2>/dev/null)
   case "$bhr" in ''|*[!0-9]*) bhr=0 ;; esac
   [ "$bhr" -gt "$nowts" ] 2>/dev/null && out+=" | BURN"
 fi
@@ -179,22 +179,22 @@ if [ -n "$branch" ] || [ -n "$dir" ]; then
   [ -n "$dir" ] && out+=" $dir"
 fi
 # Optional cost statistics (installed by `install.sh --cost`, see COST.md): cache hit rate + cost segments. Off unless
-# bin/cost.py exists next to this file; turn off without uninstalling with COST_STATUS=0 or by creating the file ~/.claude/cost/kapali
+# bin/cost.py exists next to this file; turn off without uninstalling with COST_STATUS=0 or by creating the file ~/.claude/cost/off
 # (the file works even when the environment variable does not reach the status line process).
 # Cost is the API list-price equivalent of token usage, not a bill. Nothing here scans transcripts or touches the network:
-# --status only reads ~/.claude/cost/durum.cache and, when that is older than 5 minutes, starts ONE detached background refresh (flock).
-if [ "$mal" = 1 ]; then
-  # prompt cache hit rate of the main conversation (statusline JSON prompt_cache, Claude Code >= 2.1.251): "önb %NN", misses in brackets
+# --status only reads ~/.claude/cost/status.cache and, when that is older than 5 minutes, starts ONE detached background refresh (flock).
+if [ "$cost_on" = 1 ]; then
+  # prompt cache hit rate of the main conversation (statusline JSON prompt_cache, Claude Code >= 2.1.251): "cache NN%", misses in brackets
   cache=$(jq -r 'if .prompt_cache.hit_ratio != null then "\((.prompt_cache.hit_ratio * 100 + 0.5) | floor) \(.prompt_cache.misses // 0)" else empty end' <<<"$d" 2>/dev/null)
   if [ -n "$cache" ]; then
     read -r hit misses <<<"$cache"
-    out+=" | önb %$hit"
-    [ "${misses:-0}" -gt 0 ] && out+=" ($misses kaçış)"
+    out+=" | cache $hit%"
+    [ "${misses:-0}" -gt 0 ] && out+=" ($misses misses)"
   fi
-  # "oturum ₺X": cost.total_cost_usd from the statusline JSON (resets to 0 on /clear), shown in lira (cost.py --para)
-  [ -n "${malsatir[1]:-}" ] && out+=" | oturum ${malsatir[1]}"
-  # "son 24sa ₺A (₺a) · 7g ₺B $C (₺b) · 30g ₺D (₺d) · ×N": rolling windows of hourly buckets, advisor included
-  [ -n "${malsatir[0]:-}" ] && out+=" | ${malsatir[0]}"
+  # "session ₺X": cost.total_cost_usd from the statusline JSON (resets to 0 on /clear), shown in lira (cost.py --money)
+  [ -n "${costline[1]:-}" ] && out+=" | session ${costline[1]}"
+  # "last 24h ₺A (₺a) · 7d ₺B $C (₺b) · 30d ₺D (₺d) · ×N": rolling windows of hourly buckets, advisor included
+  [ -n "${costline[0]:-}" ] && out+=" | ${costline[0]}"
 fi
 # Wrap at segment boundaries (" | ") when the row is wider than the terminal: same rule as statusline-local.ps1 (bin/line_wrap.py; width from
 # QUOTA_LINE_WIDTH / COLUMNS / the tty, none known = no wrapping). Without the helper the line is printed as is.

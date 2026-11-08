@@ -15,7 +15,7 @@ spec = importlib.util.spec_from_file_location("install_common_setting", os.path.
 K = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(K)
 
-OTHER = {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo baska"}]}
+OTHER = {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo other"}]}
 
 
 def rw_commands(cfg):

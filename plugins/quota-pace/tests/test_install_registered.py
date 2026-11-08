@@ -14,7 +14,7 @@ spec = importlib.util.spec_from_file_location("install_common_registered", os.pa
 K = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(K)
 
-# the "setup" list the install of 2026-11-05 saved (paylas, kisi, plan, last-window, both Slack jobs)
+# the "setup" list the install of 2026-11-05 saved (share, person, plan, last-window, both Slack jobs)
 RECORD = ["--share", "--person", "Selim Akçay", "--plan", "100", "--last-window", "--slack-inbox", "--slack-triage"]
 
 
