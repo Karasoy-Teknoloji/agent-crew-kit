@@ -327,7 +327,8 @@ _SECRET_UPPER = r"(?-i:(?<=[A-Z0-9])(?:PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|PASSP
 # `secretKey`, `Password1`, `passwordConfirm`. `tokens`, `secretary`, `tokenizer` have none, so they are not keys.
 # A suffix whose last segment names metadata (`_min_length`, `_expiry`, `-name`, `SecretRef`) is dropped in _is_secret_key.
 _SECRET_SUFFIX = r"(?:(?-i:[_.\-A-Z0-9])[\w.\-]{0,40})?"
-_SECRET_KEY_FULL = (r"(?:(?:(?<![^\W_])(?:" + _SECRET_KEY + r")|" + _SECRET_CAMEL + r"|" + _SECRET_UPPER + r")" + _SECRET_SUFFIX
+# `[SECRET:xxxxxxxx]` is our own token: its label must not read as the credential key `secret` followed by a value.
+_SECRET_KEY_FULL = (r"(?!(?<=\[)SECRET:[0-9a-f]{6,8}\])(?:(?:(?<![^\W_])(?:" + _SECRET_KEY + r")|" + _SECRET_CAMEL + r"|" + _SECRET_UPPER + r")" + _SECRET_SUFFIX
                 + r"|(?<!\w)pass)")
 SECRET_SUFFIX_EXCLUDED = frozenset(
     "length len min max count size limit expiry expires expiration exp ttl timeout age lifetime type kind name names ref refs "
