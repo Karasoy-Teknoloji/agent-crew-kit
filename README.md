@@ -91,8 +91,8 @@ Every setting has a documented default, so the kit works standalone. A key is re
 | `CLAUDE_SHARED_REPORT_DIR` | `report-dir` | `reports/usage` | report folder inside that repo |
 | `CLAUDE_SHARED_PEOPLE` | `people-path` | `plugins/quota-pace/people.json` | the people list inside that repo |
 | `CLAUDE_SHARED_PERSON`, `CLAUDE_SHARED_PLAN` | `person`, `plan` | `git config user.name`; none | your name in the ranking; plan size (100 or 200) |
-| `CLAUDE_SHARED_KOK` | `kok` | `~/source/repos`, else `~/src` | folder that holds your clones (daily commit count) |
-| `LAST_WINDOW_REPOLAR` | `product-repolari` | none | product repos for the last-window label and CI checks |
+| `CLAUDE_SHARED_ROOT` | `root` | `~/source/repos`, else `~/src` | folder that holds your clones (daily commit count) |
+| `LAST_WINDOW_REPOS` | `product-repos` | none | product repos for the last-window label and CI checks |
 | `LAST_WINDOW_CHANNEL`, `LAST_WINDOW_CHANNEL_ID` | `channel`, `channel-id` | `#ai-status`; none | the team's AI status channel |
 | `COST_SEPARATE_BOARDS` | | none | project numbers never counted as finished work |
 | `PACE_TARGET_HOURS` | | `5` | hours before the weekly reset the forecast aims at |

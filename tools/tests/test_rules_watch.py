@@ -496,7 +496,7 @@ class NotifyTest(unittest.TestCase):
                 unittest.mock.patch("importlib.util.spec_from_file_location", return_value=unittest.mock.MagicMock()), \
                 unittest.mock.patch.object(Path, "is_file", return_value=True):
             self.assertEqual(self.rw.notify("x"), "b")
-        self.assertEqual(sent, ["a", "b"])                         # busy sessions are skipped; a YOK moves on; a TESLIM ends it
+        self.assertEqual(sent, ["a", "b"])                         # busy sessions are skipped; a missing one moves on; a handoff ends it
 
 
 # A stand-in for plugins/quota-pace/install_common.py: records how it was called; mode.txt next to it says how the check ends.

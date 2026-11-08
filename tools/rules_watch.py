@@ -646,7 +646,7 @@ def lost_hash(last):
 def notify(text_):
     """ONE message into the person's live idle terminal session through the last-window relay (plugins/quota-pace/bin/last_window.py
     `forward`: a one-shot headless Haiku with ListAgents + SendMessage, the same one the resume alarm uses). Tries idle sessions in order until
-    one answers TESLIM; at most one delivery per run. Returns the session name or None. Off with FORWARD_RULES_WATCH=0."""
+    one hands it off (`handoff`); at most one delivery per run. Returns the session name or None. Off with FORWARD_RULES_WATCH=0."""
     if os.environ.get("FORWARD_RULES_WATCH") == "0":
         return None
     path = REPO / "plugins" / "quota-pace" / "bin" / "last_window.py"
