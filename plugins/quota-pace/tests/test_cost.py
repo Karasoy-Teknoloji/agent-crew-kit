@@ -35,7 +35,7 @@ os.environ["CLAUDE_SHARED_EFFICIENCY"] = "0"       # no cost-report scan and no 
 os.environ.pop("COST_PRICES", None)
 sys.path.insert(0, BIN)
 import cost  # noqa: E402
-import cost_parse as AY  # noqa: E402
+import cost_parse as CP  # noqa: E402
 import cost_core as CK  # noqa: E402
 
 # Fake models with round prices (USD per 1M tokens): the expected numbers below are plain arithmetic.
@@ -117,7 +117,7 @@ class ParserAndPricing(unittest.TestCase):
     def parse(self, lines, name="a.jsonl"):
         p = os.path.join(self.cfg.dir, name)
         write(p, lines)
-        return AY.parse(p)["reqs"]
+        return CP.parse(p)["reqs"]
 
     def test_token_cache_and_advisor_pricing(self):
         now = epoch(2026, 3, 1)
@@ -181,7 +181,7 @@ class ParserAndPricing(unittest.TestCase):
         self.assertIn("WARNING: 2.001.000 tokens belong to a model that is not in the price table", out)
 
     def test_packaged_price_table_is_valid_and_documented(self):
-        with open(AY.PRICE_PACKAGE, encoding="utf-8") as f:
+        with open(CP.PRICE_PACKAGE, encoding="utf-8") as f:
             d = json.load(f)
         self.assertIn("source", d)
         self.assertRegex(d["source"], r"20\d\d-\d\d-\d\d")             # source and verification date are recorded
@@ -189,22 +189,22 @@ class ParserAndPricing(unittest.TestCase):
         for name, p in d["models"].items():
             for k in ("in", "out", "read"):
                 self.assertIsInstance(p[k], (int, float), (name, k))
-        self.assertEqual(AY.PRICE_PACKAGE, os.path.join(BIN, "cost-prices.json"))
+        self.assertEqual(CP.PRICE_PACKAGE, os.path.join(BIN, "cost-prices.json"))
 
     def test_local_override_replaces_only_named_models(self):
-        keep = AY.PRICE_LOCAL
+        keep = CP.PRICE_LOCAL
         try:
-            AY.PRICE_LOCAL = os.path.join(self.cfg.dir, "cost", "prices.json")   # PRICES override from Cfg()
-            merged = AY.load_price()
+            CP.PRICE_LOCAL = os.path.join(self.cfg.dir, "cost", "prices.json")   # PRICES override from Cfg()
+            merged = CP.load_price()
         finally:
-            AY.PRICE_LOCAL = keep
+            CP.PRICE_LOCAL = keep
         self.assertEqual(merged["models"]["claude-test-1"]["in"], 10.0)
-        with open(AY.PRICE_PACKAGE, encoding="utf-8") as f:
+        with open(CP.PRICE_PACKAGE, encoding="utf-8") as f:
             pk = json.load(f)
         for m in pk["models"]:
             self.assertIn(m, merged["models"])                        # packaged models are kept
-        self.assertNotEqual(AY.price_summary(merged), AY.price_summary(pk)) # the cache key follows the effective prices
-        f = AY.Price(merged)
+        self.assertNotEqual(CP.price_summary(merged), CP.price_summary(pk)) # the cache key follows the effective prices
+        f = CP.Price(merged)
         self.assertEqual(f.find("claude-test-1-20270101")["in"], 10.0)   # prefix match
         self.assertIsNone(f.find("something-else"))
 
@@ -400,7 +400,7 @@ class Deduplication(unittest.TestCase):
         # same message id as growing partial usage; the lines may even arrive out of order, the response counts once
         write(p, [asst(t, "m1", inp=100, out=5, cr=1000, cw5=10), asst(t + 1, "m1", inp=100, out=30, cr=1000, cw5=10),
                   asst(t + 2, "m1", inp=100, out=80, cr=1000, cw5=10), asst(t + 3, "m1", inp=100, out=20, cr=1000, cw5=10)])
-        r = AY.parse(p)["reqs"]
+        r = CP.parse(p)["reqs"]
         self.assertEqual(len(r), 1)
         self.assertEqual((r[0]["in"], r[0]["out"], r[0]["cr"], r[0]["cw5"], r[0]["ts"]), (100, 80, 1000, 10, t))
 
@@ -415,7 +415,7 @@ class Deduplication(unittest.TestCase):
         c["message"].pop("id")
         c["uuid"] = "u1"
         write(p, [a, dict(a, requestId="req_1"), b, dict(b), c, dict(c, uuid="u2")])
-        r = AY.parse(p)["reqs"]
+        r = CP.parse(p)["reqs"]
         # m1 once (the extra requestId does not split it), req_9 once, and the uuid fallback is per line: 2 distinct uuids
         self.assertEqual(sorted(x["in"] for x in r), [1, 2, 4, 4])
 

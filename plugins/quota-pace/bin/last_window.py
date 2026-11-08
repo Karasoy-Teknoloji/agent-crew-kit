@@ -937,7 +937,7 @@ def claude_path():
 
 def repos_root():
     import cost_share as MP
-    return MP.kok_dir() or HOME
+    return MP.root_dir() or HOME
 
 
 def machine_name():
@@ -1228,7 +1228,7 @@ def tmux(*args, timeout=30):
 
 
 ENV_KEYS = ("PATH", "HOME", "SSH_AUTH_SOCK", "CLAUDE_CONFIG_DIR", "GH_CONFIG_DIR", "XDG_CONFIG_HOME", "GIT_TERMINAL_PROMPT", "GIT_CONFIG_COUNT",
-                     "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "CLAUDE_SHARED_PERSON", "CLAUDE_SHARED_KOK", "CLAUDE_SHARED_REMOTE", "PACE_TARGET_HOURS")
+                     "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "CLAUDE_SHARED_PERSON", "CLAUDE_SHARED_ROOT", "CLAUDE_SHARED_REMOTE", "PACE_TARGET_HOURS")
 
 
 def session_command(name, sid, brief):

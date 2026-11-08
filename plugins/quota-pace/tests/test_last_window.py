@@ -464,7 +464,7 @@ class Working(unittest.TestCase):
                    LAST_WINDOW_CHOICE=self.choice, LAST_WINDOW_POLL="0.2", LAST_WINDOW_ACK_SEC="5", LAST_WINDOW_STOP_SEC="1", LAST_WINDOW_RECORD_SEC="5",
                    FAKE_TMUX_RECORD="%s:%d" % (os.path.join(self.claude, "sessions"), self.live2.pid), FAKE_MODE=mode, FAKE_MARK=self.mark,
                    FAKE_TMUX_STATE=self.tstate, CLAUDE_SHARED_REMOTE=self.remote, CLAUDE_SHARED_LAST_WINDOW_CLONE=self.clone, CLAUDE_SHARED_PERSON="Emre",
-                   CLAUDE_SHARED_KOK=self.home, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@x",
+                   CLAUDE_SHARED_ROOT=self.home, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@x",
                    GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@x")
         env.update(extra)
         return env

@@ -391,8 +391,8 @@ def merge(registered, scanning, today, again=False, keep=()):
 
 
 def save(again=False, cache_=True):
-    tg, ts = scan_records(scan(cache_))
-    scanning = tg
+    day_recs, hour_recs = scan_records(scan(cache_))
+    scanning = day_recs
     registered = daily_read()
     today = today_str()
     keep = missing_days(registered) if again else set()
@@ -410,7 +410,7 @@ def save(again=False, cache_=True):
     print("cost record: %d days (new %d, updated %d, kept %d) | %s … %s | total %.2f $ | %s"
           % (len(last), new_count, changing - new_count, kept, days[0] if days else "-", days[-1] if days else "-",
              sum(r.get("usd", 0) for r in last.values()), DAILY))
-    hour = merge_hourly(read_hourly(), ts, int(time.time() // 3600), again, keep)
+    hour = merge_hourly(read_hourly(), hour_recs, int(time.time() // 3600), again, keep)
     write_hourly(hour)
     os.chmod(HOURLY, 0o600)
     print("hourly record: %d hours | %s" % (len(hour), HOURLY))
@@ -536,9 +536,9 @@ def status_write_cache(records, hour):
 def scan_records(files=None):
     """Daily + hourly records built from the scan. Returns (day records, hour records)."""
     d = files if files is not None else scan()
-    tg = build_records(d)
-    ts = build_hours(d)
-    return tg, ts
+    day_recs = build_records(d)
+    hour_recs = build_hours(d)
+    return day_recs, hour_recs
 
 
 def daily_write(last):
@@ -559,9 +559,9 @@ def refresh_status():
     """Incremental: unchanged transcripts come from the file cache, only changed ones are read; same merge as --save.
     The hourly file is updated too (not rewritten when the content is unchanged)."""
     files = scan()
-    tg, ts = scan_records(files)
-    last, _, _ = merge(daily_read(), tg, today_str())
-    hour = merge_hourly(read_hourly(), ts, int(time.time() // 3600))
+    day_recs, hour_recs = scan_records(files)
+    last, _, _ = merge(daily_read(), day_recs, today_str())
+    hour = merge_hourly(read_hourly(), hour_recs, int(time.time() // 3600))
     write_hourly(hour)
     daily_write(last)    # the daily record too: macOS has no timer, and the refresh runs while Claude Code is in use
     status_write_cache(last, hour)
@@ -770,9 +770,9 @@ def every_data(records, today):
 
 def fetch_records(cache_=True):
     """CLI/JSON: stored history + a fresh scan (writes nothing). Returns the day records; the hour records are left in fetch_records.hour."""
-    tg, ts = scan_records(scan(cache_))
-    last, _, _ = merge(daily_read(), tg, today_str())
-    fetch_records.hour = merge_hourly(read_hourly(), ts, int(time.time() // 3600))
+    day_recs, hour_recs = scan_records(scan(cache_))
+    last, _, _ = merge(daily_read(), day_recs, today_str())
+    fetch_records.hour = merge_hourly(read_hourly(), hour_recs, int(time.time() // 3600))
     return last
 
 
@@ -970,12 +970,12 @@ def default_report(V):
         L += table(months, "month")
         L += summary_end(months, "month", "month")
         L.append("  models: " + model_section(combined_model(months)))
-    yl = V["year"]["lines"]
-    if yl:
+    years = V["year"]["lines"]
+    if years:
         L.append(title("YEARS"))
-        L += table(yl, "year")
-        L += summary_end(yl, "year", "year")
-        L.append("  models: " + model_section(combined_model(yl)))
+        L += table(years, "year")
+        L += summary_end(years, "year", "year")
+        L.append("  models: " + model_section(combined_model(years)))
         L.append("  (the yearly view fills up as history builds up: Claude Code deletes old transcripts, the daily totals are kept in daily.jsonl)")
     if V["top_sessions"]:
         L.append(title("10 MOST EXPENSIVE SESSIONS (all data; id = first 8 characters, date = first day seen)"))
@@ -1034,7 +1034,7 @@ def panel_tables(V):
     session_all = set()
     for period in ("day", "week", "month", "year"):
         rows = V[period]["lines"]
-        oz = V[period]["summary"]
+        summ = V[period]["summary"]
         tok = defaultdict(int)
         adv = main_ = sub = request = runs = 0.0
         for s in rows:
@@ -1072,12 +1072,12 @@ def panel_tables(V):
                                 "name": o["id"][:8], "usd": o["usd"], "share": round(o["usd"] / top, 4), "date": o["date"], "order": i})
         t = tok["in"] + tok["cr"] + tok["cw5"] + tok["cw1h"]
         summary.append({
-            "line": period, "view": period, "total_usd": oz.get("total_usd", 0), "active_days": oz.get("active_days", 0),
-            "avg_active_day_usd": oz.get("avg_active_day_usd", 0), "avg_period_usd": oz.get("avg_period_usd", 0),
-            "avg_period_note": oz.get("avg_period_note", ""),
-            "busiest_label": (oz.get("busiest") or {}).get("label", ""), "busiest_usd": (oz.get("busiest") or {}).get("usd", 0),
-            "cheapest_label": (oz.get("cheapest") or {}).get("label", ""), "cheapest_usd": (oz.get("cheapest") or {}).get("usd", 0),
-            "period_count": oz.get("period_count", 0), "full_period_count": oz.get("full_period_count", 0), "pool_count": oz.get("pool_count", 0),
+            "line": period, "view": period, "total_usd": summ.get("total_usd", 0), "active_days": summ.get("active_days", 0),
+            "avg_active_day_usd": summ.get("avg_active_day_usd", 0), "avg_period_usd": summ.get("avg_period_usd", 0),
+            "avg_period_note": summ.get("avg_period_note", ""),
+            "busiest_label": (summ.get("busiest") or {}).get("label", ""), "busiest_usd": (summ.get("busiest") or {}).get("usd", 0),
+            "cheapest_label": (summ.get("cheapest") or {}).get("label", ""), "cheapest_usd": (summ.get("cheapest") or {}).get("usd", 0),
+            "period_count": summ.get("period_count", 0), "full_period_count": summ.get("full_period_count", 0), "pool_count": summ.get("pool_count", 0),
             "hit": round(tok["cr"] / t, 4) if t else None, "advisor_usd": round(adv, 4), "main_usd": round(main_, 4),
             "sub_usd": round(sub, 4), "request": int(request), "agent_runs": int(runs),
             "created": V["created"], "today": V["today"], "first_day": V["scope"]["first_day"], "last_day": V["scope"]["last_day"],
