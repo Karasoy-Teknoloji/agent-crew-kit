@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stop / SubagentStop hook: block a final assistant message that (1) contains a hedge word (a guess dressed as a fact) or
-(2) claims missing access ("yetki yok", "no token", "permission denied") or asks for a credential/permission without a
-`kasa.py bul` Vault search in the same turn or earlier in the session (last few hours), or (3, Stop only) ends a turn whose
+(2) claims missing access ("no token", "permission denied", or the Turkish "yetki yok") or asks for a credential/permission without a
+`vault_cli.py find` Vault search in the same turn or earlier in the session (last few hours), or (3, Stop only) ends a turn whose
 user prompt was a decision that the turn did not record on GitHub.
 
 Team rules: WORKING-RULES.md "No probabilities in reports" / "Evidence before claims" / "Decisions live on GitHub", AUTONOMY.md
@@ -14,30 +14,32 @@ Contract (https://code.claude.com/docs/en/hooks, Stop and SubagentStop): the hoo
 
 What counts: text of the last assistant message of the turn (text blocks only, never tool calls), with fenced code blocks,
 `inline code`, ">" quote lines and "quoted" / “quoted” text removed. Matching is case-insensitive with Turkish letters
-folded (I/ı/İ/i), on word boundaries.
+folded (I/ı/İ/i), on word boundaries. The hook reads Turkish and English chat, so the Turkish hedge, claim and decision word
+lists below are input data and stay Turkish on purpose.
 
 Access-claim check: a claim pattern (see _CLAIM_SOURCES: OUR missing access/permission/credential, or a request to the user for
-one) in the same prose (code/quotes removed) is allowed when the turn's tool calls include a Bash command running `kasa.py bul`
+one) in the same prose (code/quotes removed) is allowed when the turn's tool calls include a Bash command running `vault_cli.py find`
 (the turn = the transcript after the last real user prompt; for SubagentStop the subagent's own `agent_transcript_path`), when
-the message itself cites `kasa.py bul`, or when the same transcript shows a `kasa.py bul` run or citation within the last
-BUL_MEMORY_HOURS (3 h, env KANIT_KANCASI_BUL_HOURS; session memory, see bul_in_session). A bare HTTP status (401/403) in a result
+the message itself cites `vault_cli.py find`, or when the same transcript shows a `vault_cli.py find` run or citation within the last
+FIND_MEMORY_HOURS (3 h, env EVIDENCE_HOOK_FIND_HOURS; session memory, see find_in_session). A bare HTTP status (401/403) in a result
 report about an external system is not a claim. An unreadable
 transcript means "unknown" and never blocks.
 
 Decision check (Stop only; subagents act on briefs, not on user decisions): the turn's prompt is a human prompt (origin "human",
 not a task notification, command output or meta entry) that reads as a decision: a DECISION_MARKERS word, or a short APPROVALS
-reply ("tamam", "evet", "aynen") to a previous assistant message that made a proposal (PROPOSAL_MARKERS). Questions (ending
-with "?" or holding the particle mı/mi/mu/mü) are not decisions. The turn is satisfied by any of: (a) a GitHub write in a
+reply ("ok", "yes", or the Turkish "tamam", "evet", "aynen") to a previous assistant message that made a proposal (PROPOSAL_MARKERS). Questions (ending
+with "?" or holding the Turkish question particle mı/mi/mu/mü) are not decisions. The turn is satisfied by any of: (a) a GitHub write in a
 Bash/PowerShell call (`gh issue comment|create`, `gh api`/`api.github.com` POST to .../issues or .../issues/<n>/comments, or a
 GitHub MCP issue-comment/create tool); (b) an Agent/SendMessage call whose text holds a github.com issue URL, or an issue
-target plus a comment/open verb; (c) the final message has `Karar kaydı: <github issue/comment URL>` or
-`Karar kaydı: ajan yazıyor`; (d) the final message has `Karar kaydı: yok (<short reason>)`. Otherwise it blocks once.
+target plus a comment/open verb; (c) the final message has `Decision record: <github issue/comment URL>` or
+`Decision record: agent is writing`; (d) the final message has `Decision record: none (<short reason>)`. The old Turkish forms
+(`Karar kaydı: ...`, `ajan yazıyor`, `yok (...)`) are still accepted as input. Otherwise it blocks once.
 
 A block reason always ends with RESTATE: the agent must write its complete final report again, because the reader gets only the last message.
 
 Never loops: when `stop_hook_active` is true (Claude is already continuing because of a Stop hook) it exits 0 without blocking.
 Fails open: any error, missing file or parse problem exits 0; an unexpected exception appends one line to LOG
-(~/.cache/kanit-kancasi.log, override with KANIT_KANCASI_LOG).
+(~/.cache/evidence-hook.log, override with EVIDENCE_HOOK_LOG).
 """
 import json
 import os
@@ -48,12 +50,13 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+# Hedge words: Turkish ones are input data (the hook reads Turkish chat), the English ones follow.
 HEDGES = ["muhtemelen", "büyük ihtimalle", "büyük olasılıkla", "galiba", "sanırım", "herhalde", "olsa gerek",
           "probably", "likely", "presumably"]
 TAIL_BYTES = 4 * 1024 * 1024  # a transcript can be huge; the last message is always at the end
 
 REASON = ("Your last message contains the hedge '{word}'. A guess is not a claim: either verify it now (command + evidence) "
-          "and restate, or replace it with 'doğrulanmadı — <check that would verify it>' or 'kontrol ediyorum'. "
+          "and restate, or replace it with 'unverified — <check that would verify it>' or 'checking now'. "
           "Do not repeat the guess.")
 
 
@@ -87,9 +90,9 @@ def find_hedge(text):
 
 # ---- access claims -------------------------------------------------------------------------------------------------------
 REASON_ACCESS = ("Your last message claims missing access or asks for a credential/permission ('{claim}'), but neither this turn nor "
-                 "the last hours of this session show a `kasa.py bul` search. A working credential may already sit in Vault (e.g. a 403 on the publish token while a "
-                 "read-scope token existed). Now: run `kasa.py bul <system> [<scope>]` (e.g. `kasa.py bul panel okuma`), try every "
-                 "matching credential with `kasa.py run --env NAME=<path>#<field> -- <command>`, then restate and list the searches "
+                 "the last hours of this session show a `vault_cli.py find` search. A working credential may already sit in Vault (e.g. a 403 on the publish token while a "
+                 "read-scope token existed). Now: run `vault_cli.py find <system> [<scope>]` (e.g. `vault_cli.py find panel read`), try every "
+                 "matching credential with `vault_cli.py run --env NAME=<path>#<field> -- <command>`, then restate and list the searches "
                  "and the credentials you tried. Ask a person only for what still fails after that, as one action.")
 # A subagent's coordinator receives only its last message, so a short follow-up ("the report above stands") loses the report.
 RESTATE = ("Then write your COMPLETE final report again in your next message (the reader receives only your last message); "
@@ -106,7 +109,7 @@ _ASCII_FOLD = str.maketrans("şğüöçâîû", "sguocaiu")
 
 _AUX = r"(?:(?:have|the|a|an|any|valid|sufficient|required|read|write|enough)\s+)*"
 _CLAIM_SOURCES = [
-    # Turkish: "<thing> yok"
+    # Turkish (input data, kept on purpose): "<thing> yok" = "<thing> is missing"
     r"yetki(?:si|m|miz|niz|leri)?\s+(?:yok|yetersiz|eksik|bulunmuyor|bulunamadi|verilmemis|verilmedi)",
     r"erisim(?:i|im|imiz)?\s+(?:yok|reddedildi|engellendi|saglanamadi|bulunmuyor)",
     r"(?:token|pat|anahtar|sifre|parola|kimlik\s+bilgisi|credential|api\s*key)\w*\s+(?:\S+\s+){0,2}?(?:yok|bulunamadi|bulunmuyor|eksik)\b",
@@ -114,11 +117,11 @@ _CLAIM_SOURCES = [
     r"(?:izin|yetki|erisim)\s+(?:gerekiyor|gerekli|lazim|istiyor|verilmedi|verilmemis)\b",
     r"(?:token|pat|parola|sifre|anahtar|credential|yetki|erisim)\w*\s+(?:verir|verebilir|saglar|paylasir|paylasabilir)\s+misin",
     r"(?:token|pat|parola|sifre|anahtar|credential|yetki|erisim)\w*\s+(?:verin|verseniz|verirseniz|vermeniz|paylasin|paylasirsaniz)",
-    # asking the user for access (b): "yetki ver", "erişim aç", "giriş yap"
+    # Turkish: asking the user for access (b): "yetki ver" (grant access), "erişim aç" (open access), "giriş yap" (log in)
     r"\byetki\s+ver(?:in|ir\s+misin|ebilir\s+misin)?(?!\w)",
     r"\berisim\s+(?:ac|acin|ver|verin|acar\s+misin|acabilir\s+misin)(?!\w)",
     r"\bgiris\s+yap(?:in|abilir\s+misin|ar\s+misin)?(?!\w)(?!\s+(?:buton|ekran|sayfa))",
-    # NOT here: a bare HTTP status (401/403, "unauthorized", "forbidden", "kimlik doğrulanamadı") in a result report. That
+    # NOT here: a bare HTTP status (401/403, "unauthorized", "forbidden", Turkish "kimlik doğrulanamadı" = "identity could not be verified") in a result report. That
     # relays an external system's answer; it is not a claim about OUR access. It counts only with the wording above/below.
     # English
     r"\bno\s+(?:access|permissions?|tokens?|credentials?|api\s*key)\b",
@@ -132,21 +135,21 @@ _CLAIM_SOURCES = [
     r"\b(?:i|we)\s+(?:need|require)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+)?(?:token|pat|credentials?|access|permission)\b",
 ]
 _CLAIMS = re.compile("(?:" + "|".join(_CLAIM_SOURCES) + ")")
-# "No secret in the code/repo" is good news, not missing access ("kodda artik sifre yok", "repoda token bulunmuyor").
+# "No secret in the code/repo" is good news, not missing access (Turkish "kodda artik sifre yok" (no password in the code any more), "repoda token bulunmuyor" (no token in the repo)).
 _BENIGN_ABSENCE = re.compile(
     r"\b(?:kod|repo|kaynak|dosya|commit|diff|gecmis|branch|log)\w*\s+(?:\S+\s+){0,3}?"
     r"(?:token|pat|anahtar|sifre|parola|kimlik\s+bilgisi|credential|api\s*key)\w*\s+(?:yok|bulunmuyor|kalmadi)\b")
-_BUL_RUN = re.compile(r"\bkasa(?:\.py)?[\"']?\s+bul\b")
+_FIND_RUN = re.compile(r"\bvault_cli(?:\.py)?[\"']?\s+find\b")
 # Session memory: a `vault_cli.py find` run (Bash call) or citation (assistant text) anywhere earlier in the same transcript within
-# the last BUL_MEMORY_HOURS counts like a search in the current turn. Env EVIDENCE_HOOK_FIND_HOURS overrides (0 = turn only).
-BUL_MEMORY_HOURS = float(os.environ.get("KANIT_KANCASI_BUL_HOURS") or 3)
+# the last FIND_MEMORY_HOURS counts like a search in the current turn. Env EVIDENCE_HOOK_FIND_HOURS overrides (0 = turn only).
+FIND_MEMORY_HOURS = float(os.environ.get("EVIDENCE_HOOK_FIND_HOURS") or 3)
 SESSION_TAIL_BYTES = 32 * 1024 * 1024  # read lazily, only when a claim was found and the turn has no search
 
 
 def find_access_claim(text):
     """Return the first missing-access / credential-request claim in the prose outside code and quotes, or None.
-    A message that cites `kasa.py bul` (the search it ran) has no claim to answer for."""
-    if _BUL_RUN.search(text):
+    A message that cites `vault_cli.py find` (the search it ran) has no claim to answer for."""
+    if _FIND_RUN.search(text):
         return None
     m = _CLAIMS.search(_BENIGN_ABSENCE.sub(" ", fold_ascii(strip_quoted(text))))
     return re.sub(r"\s+", " ", m.group(0)).strip() if m else None
@@ -207,12 +210,12 @@ def _human_text(entry):
 
 
 class Turn:
-    """What the current turn did. ran_bul: a Bash call ran `kasa.py bul`; handback: the SubagentHandback report text;
+    """What the current turn did. ran_find: a Bash call ran `vault_cli.py find`; handback: the SubagentHandback report text;
     recorded: a tool call recorded a decision on GitHub or delegated that (records_decision); prompt: the human prompt text
     ("" when no person started the turn); prev_text: the last assistant text before that prompt (the proposal a reply answers)."""
 
     def __init__(self):
-        self.ran_bul, self.handback, self.recorded, self.prompt, self.prev_text = False, "", False, "", ""
+        self.ran_find, self.handback, self.recorded, self.prompt, self.prev_text = False, "", False, "", ""
 
 
 def scan_turn(path):
@@ -238,8 +241,8 @@ def scan_turn(path):
                     continue
                 name = str(b.get("name", ""))
                 inp = b.get("input") if isinstance(b.get("input"), dict) else {}
-                if name == "Bash" and _BUL_RUN.search(str(inp.get("command", ""))):
-                    turn.ran_bul = True
+                if name == "Bash" and _FIND_RUN.search(str(inp.get("command", ""))):
+                    turn.ran_find = True
                 elif name == "SubagentHandback" and not turn.handback:
                     turn.handback = str(inp.get("message", ""))
                 if not turn.recorded and records_decision(name, inp):
@@ -261,10 +264,10 @@ def _entry_time(entry):
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
-def bul_in_session(path, hours=None):
-    """Whether the transcript shows a `kasa.py bul` run or citation within the last `hours` (default BUL_MEMORY_HOURS), in any
+def find_in_session(path, hours=None):
+    """Whether the transcript shows a `vault_cli.py find` run or citation within the last `hours` (default FIND_MEMORY_HOURS), in any
     turn. Entries without a readable timestamp do not count (unknown age). Unreadable transcript: False (the caller decides)."""
-    hours = BUL_MEMORY_HOURS if hours is None else hours
+    hours = FIND_MEMORY_HOURS if hours is None else hours
     if hours <= 0:
         return False
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
@@ -280,9 +283,9 @@ def bul_in_session(path, hours=None):
                 if not isinstance(b, dict):
                     continue
                 if b.get("type") == "tool_use" and b.get("name") == "Bash" \
-                        and _BUL_RUN.search(str((b.get("input") or {}).get("command", ""))):
+                        and _FIND_RUN.search(str((b.get("input") or {}).get("command", ""))):
                     return True
-                if b.get("type") == "text" and _BUL_RUN.search(str(b.get("text", ""))):
+                if b.get("type") == "text" and _FIND_RUN.search(str(b.get("text", ""))):
                     return True
     except OSError:
         return False
@@ -292,14 +295,14 @@ def bul_in_session(path, hours=None):
 # ---- decisions -----------------------------------------------------------------------------------------------------------
 # The one place to tune what reads as a decision. Words are matched after fold_ascii (lower case, Turkish letters folded, so
 # they are written in ASCII) on word boundaries; a trailing "*" also matches longer words with that start.
-# Imperative decision verbs: they make a prompt a decision even when it also holds a question word ("ne durumda, başla").
+# Imperative decision verbs: they make a prompt a decision even when it also holds a question word (Turkish "ne durumda, başla": "how is it going, start").
 DECISION_VERBS = [
     "yapalim", "olsun", "erteleyelim", "ertele", "onayliyorum", "onayladim", "basla", "baslayalim", "baslat", "kalsin",
     "iptal", "gonder", "gonderelim", "gecelim", "ekleyelim", "kaldiralim", "silelim", "kullanalim", "secelim", "birakalim",
     "vazgectim", "vazgecelim", "yayinla", "yayinlayalim", "merge et", "artiralim", "azaltalim", "dusurelim", "yukseltelim",
     "let's", "go ahead", "approved", "i approve", "do it", "ship it", "postpone",
 ]
-# Decision nouns: a decision only in a prompt without a question word ("öncelik" alone in "işler ne durumda" is a question).
+# Decision nouns: a decision only in a prompt without a question word (Turkish "öncelik" = priority, alone in "işler ne durumda" = "how are the tasks going" it is a question).
 DECISION_NOUNS = ["karar", "kararim", "kararimiz", "oncelik", "oncelikli", "decided"]
 DECISION_MARKERS = DECISION_VERBS + DECISION_NOUNS
 # Turkish question words: a prompt holding one is a question (also without "?") unless it holds a DECISION_VERBS word.
@@ -327,7 +330,7 @@ _DECISION_VERB = _word_pattern(DECISION_VERBS)
 _QUESTION_WORD = _word_pattern(QUESTION_WORDS)
 _APPROVAL = _word_pattern(APPROVALS)
 _PROPOSAL = _word_pattern(PROPOSAL_MARKERS)
-# the question particle mı/mi/mu/mü (folded to mi/mu) with its personal endings: "mı", "misin", "miyiz", "midir", "muydu", ...
+# the Turkish question particle mı/mi/mu/mü (folded to mi/mu) with its personal endings: "mı", "misin", "miyiz", "midir", "muydu", ...
 _QUESTION_PARTICLE = re.compile(r"(?<!\w)m[iu](?:s[iu]n(?:[iu]z)?|y[iu]z|y[iu]m|d[iu]r|yd[iu]|ym[iu]s)?(?!\w)")
 
 
@@ -352,7 +355,7 @@ _GH_API_WRITE = re.compile(r"(?:\bgh\s+api\b|api\.github\.com/)(?=.*?" + _ISSUE_
                            r"(?!.*?(?:-X\s*GET|--method[\s=]+GET))", re.S | re.I)
 _MCP_ISSUE_WRITE = re.compile(r"github.*(?:add_issue_comment|create_issue|issue_write|add_comment)", re.I)
 _ISSUE_URL = re.compile(r"github\.com/[\w.-]+/[\w.-]+/issues/\d+")
-_RECORD_TARGET = re.compile(r"(?<!\w)(?:issue\w*|urun\s+kararlari|[\w.-]+#\d+)")
+_RECORD_TARGET = re.compile(r"(?<!\w)(?:issue\w*|urun\s+kararlari|product\s+decisions|[\w.-]+#\d+)")
 _RECORD_VERB = re.compile(r"(?<!\w)(?:comment\w*|yorum\w*|open|create|record|post|kaydet\w*|kaydi|ac|acin|olustur\w*|"
                           r"yaz\w*|write)(?!\w)")
 
@@ -369,13 +372,14 @@ def records_decision(name, inp):
 
 
 # (c) / (d): the final message names the record, says an agent writes it, or says why there is none
-_RECORD_LINE = re.compile(r"karar\s+kaydi\s*:\s*(?:https?://github\.com/\S+/(?:issues|pull)/\d+|ajan\s+yaziyor|"
-                         r"yok\s*\(\s*[^)\s][^)]*\))")
+# English form first; the old Turkish form ("Karar kaydı: ... ajan yazıyor / yok (...)") stays accepted as input.
+_RECORD_LINE = re.compile(r"(?:decision\s+record|karar\s+kaydi)\s*:\s*(?:https?://github\.com/\S+/(?:issues|pull)/\d+|"
+                         r"agent\s+is\s+writing|ajan\s+yaziyor|(?:none|yok)\s*\(\s*[^)\s][^)]*\))")
 REASON_DECISION = ("The user's message in this turn reads as a decision ('{marker}'), but this turn did not record it on GitHub "
-                   "(rule 'Decisions live on GitHub'). Now: post it as a short Turkish comment on the related issue (product-wide: "
-                   "the repo's 'Ürün kararları' issue; team/process: the team decisions issue), or delegate that to an agent, and "
-                   "end with the line 'Karar kaydı: <issue or comment URL>' (or 'Karar kaydı: ajan yazıyor'). If it is not a "
-                   "decision, end with 'Karar kaydı: yok (<short reason>)'.")
+                   "(rule 'Decisions live on GitHub'). Now: post it as a short comment on the related issue (product-wide: "
+                   "the repo's 'Product decisions' issue; team/process: the team decisions issue), or delegate that to an agent, and "
+                   "end with the line 'Decision record: <issue or comment URL>' (or 'Decision record: agent is writing'). If it is not a "
+                   "decision, end with 'Decision record: none (<short reason>)'.")
 
 
 def last_assistant_text(path):
@@ -420,9 +424,9 @@ def main():
     subagent = data.get("hook_event_name") == "SubagentStop"
     tpath = data.get("agent_transcript_path") if subagent else data.get("transcript_path")
     turn = scan_turn(tpath) if isinstance(tpath, str) and tpath else None
-    if turn is not None and not turn.ran_bul:
+    if turn is not None and not turn.ran_find:
         claim = find_access_claim(text + "\n" + turn.handback)
-        if claim and not bul_in_session(tpath):
+        if claim and not find_in_session(tpath):
             reasons.append(REASON_ACCESS.format(claim=claim))
     # decisions: main session only (subagents act on briefs, not on user decisions)
     if turn is not None and not subagent and not turn.recorded and not _RECORD_LINE.search(fold_ascii(text)):
@@ -434,7 +438,7 @@ def main():
         print(json.dumps({"decision": "block", "reason": " | ".join(reasons) + " " + RESTATE}, ensure_ascii=True))
 
 
-LOG = Path(os.environ.get("KANIT_KANCASI_LOG") or Path.home() / ".cache" / "kanit-kancasi.log")
+LOG = Path(os.environ.get("EVIDENCE_HOOK_LOG") or Path.home() / ".cache" / "evidence-hook.log")
 LOG_MAX_BYTES = 256 * 1024
 
 
@@ -444,7 +448,7 @@ def log_error(exc):
         LOG.parent.mkdir(parents=True, exist_ok=True)
         mode = "w" if LOG.exists() and LOG.stat().st_size > LOG_MAX_BYTES else "a"
         with open(LOG, mode, encoding="utf-8") as f:
-            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} kanit_kancasi allowed after error: {type(exc).__name__}: "
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} evidence_hook allowed after error: {type(exc).__name__}: "
                     f"{str(exc)[:200]!r}\n")
     except Exception:
         pass
