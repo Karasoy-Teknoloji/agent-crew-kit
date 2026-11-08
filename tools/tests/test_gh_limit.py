@@ -38,7 +38,7 @@ FAKE_GH = textwrap.dedent(r'''
         sys.exit(1)
     if inc:
         sys.stdout.write("HTTP/2.0 200 OK\r\nEtag: W/\"e1\"\r\nX-Ratelimit-Remaining: 4998\r\nX-Ratelimit-Resource: core\r\n\r\n")
-    sys.stdout.write("govde-%s\n" % sys.stdin.read() if "-" in sys.argv else "govde\n")
+    sys.stdout.write("body-%s\n" % sys.stdin.read() if "-" in sys.argv else "body\n")
 ''').lstrip()
 
 
@@ -48,7 +48,7 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(c("auth", "git-credential", "get"), "transition")
         self.assertEqual(c("--version"), "transition")
         self.assertEqual(c("run", "watch", "--help"), "transition")
-        self.assertEqual(c("api", "repos/o/r/actions/runs/5"), "okuma")
+        self.assertEqual(c("api", "repos/o/r/actions/runs/5"), "read")
         self.assertEqual(c("api", "repos/o/r/issues/1/comments", "-f", "body=x"), "write")
         self.assertEqual(c("api", "-XPATCH", "repos/o/r/issues/1"), "write")
         self.assertEqual(c("api", "--method=DELETE", "repos/o/r/git/refs/heads/x"), "write")
@@ -57,21 +57,21 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(c("api", "graphql", "-f", "query=query { viewer { login } }"), "graphql")
         self.assertEqual(c("api", "graphql", "-f", "query=mutation { addComment(input:{}) { clientMutationId } }"), "write")
         self.assertEqual(c("issue", "comment", "5", "--body", "x"), "write")
-        self.assertEqual(c("issue", "list", "-R", "o/r"), "okuma")
+        self.assertEqual(c("issue", "list", "-R", "o/r"), "read")
         self.assertEqual(c("run", "watch", "123"), "watch")
         self.assertEqual(c("pr", "checks", "4", "--watch"), "watch")
         self.assertEqual(c("search", "code", "foo"), "code_search")
         self.assertEqual(c("search", "issues", "foo"), "search")
-        self.assertEqual(c("run", "list", "-L", "5"), "okuma")
+        self.assertEqual(c("run", "list", "-L", "5"), "read")
 
     def test_watch_interval(self):
         self.assertEqual(g.watch_interval(["run", "watch", "5"]), ["run", "watch", "5", "--interval", str(g.WATCH_INTERVAL)])
         self.assertEqual(g.watch_interval(["run", "watch", "5", "-i", "60"]), ["run", "watch", "5", "-i", "60"])
         self.assertEqual(g.watch_interval(["pr", "checks", "--watch", "--interval=90"]), ["pr", "checks", "--watch", "--interval=90"])
 
-    def test_uc_normal(self):
-        self.assertEqual(g.uc_normal("/repos/o/r/actions/runs/123456/jobs?per_page=5"), "repos/o/r/actions/runs/:n/jobs")
-        self.assertEqual(g.uc_normal("repos/o/r/commits/abcdef1234567"), "repos/o/r/commits/:sha")
+    def test_normalize_endpoint(self):
+        self.assertEqual(g.normalize_endpoint("/repos/o/r/actions/runs/123456/jobs?per_page=5"), "repos/o/r/actions/runs/:n/jobs")
+        self.assertEqual(g.normalize_endpoint("repos/o/r/commits/abcdef1234567"), "repos/o/r/commits/:sha")
 
 
 class LimitTest(unittest.TestCase):
@@ -97,8 +97,8 @@ class LimitTest(unittest.TestCase):
         self.assertAlmostEqual(g.pace_interval(1200, 2000, 1000), 1000 / 1000 * g.MACHINE)
         self.assertEqual(g.pace_interval(100, 4600, 1000), g.PACE_UPPER)
         self.assertEqual(g.pace_interval(100, 900, 1000), 0.0)          # window already reset
-        self.assertEqual(g.source("okuma", ["pr", "view", "1"], None), "graphql")
-        self.assertEqual(g.source("okuma", ["run", "view", "1"], None), "core")
+        self.assertEqual(g.source("read", ["pr", "view", "1"], None), "graphql")
+        self.assertEqual(g.source("read", ["run", "view", "1"], None), "core")
 
     def test_waiting(self):
         self.assertEqual(g.waiting_duration(1, retry_after=30), (30.0, False))
@@ -108,14 +108,14 @@ class LimitTest(unittest.TestCase):
         self.assertEqual(g.waiting_duration(2)[0], 120.0)
         self.assertEqual(g.waiting_duration(5)[0], g.WAIT_UPPER)
 
-    def test_title_ve_limit(self):
-        d, b, body = g.split_title(b"HTTP/2.0 403 Forbidden\r\nRetry-After: 7\r\n\r\n{\"m\":1}")
+    def test_headers_and_limit(self):
+        d, b, body = g.split_headers(b"HTTP/2.0 403 Forbidden\r\nRetry-After: 7\r\n\r\n{\"m\":1}")
         self.assertEqual((d, b["retry-after"], body), (403, "7", b'{"m":1}'))
-        self.assertEqual(g.split_title(b"plain"), (None, {}, b"plain"))
-        self.assertTrue(g.limited_mi(d, b, 1, ""))
-        self.assertFalse(g.limited_mi(403, {"x-ratelimit-remaining": "10"}, 1, "Resource not accessible by integration"))
-        self.assertTrue(g.limited_mi(None, {}, 1, "gh: You have exceeded a secondary rate limit (HTTP 403)"))
-        self.assertFalse(g.limited_mi(404, {}, 1, "Not Found"))
+        self.assertEqual(g.split_headers(b"plain"), (None, {}, b"plain"))
+        self.assertTrue(g.is_limited(d, b, 1, ""))
+        self.assertFalse(g.is_limited(403, {"x-ratelimit-remaining": "10"}, 1, "Resource not accessible by integration"))
+        self.assertTrue(g.is_limited(None, {}, 1, "gh: You have exceeded a secondary rate limit (HTTP 403)"))
+        self.assertFalse(g.is_limited(404, {}, 1, "Not Found"))
 
 
 class FakeGhTest(unittest.TestCase):
@@ -142,17 +142,17 @@ class FakeGhTest(unittest.TestCase):
     def log(self):
         return [json.loads(s) for s in (self.tmp / "d" / "log").read_text().splitlines()]
 
-    def test_transition_ve_flagless_output(self):
+    def test_transition_and_flagless_output(self):
         r = self.gh("run", "list")
-        self.assertEqual((r.returncode, r.stdout), (0, b"govde\n"))
+        self.assertEqual((r.returncode, r.stdout), (0, b"body\n"))
         self.assertEqual(json.loads((self.tmp / "s" / "argv1").read_text()), ["run", "list"])
-        self.assertEqual(self.log()[-1]["kind"], "okuma")
+        self.assertEqual(self.log()[-1]["kind"], "read")
 
     def test_secondary_at_limit_again_tries(self):
         t = time.time()
         r = self.gh("api", "repos/o/r/issues/1/comments", "-f", "body=x", mod="secondary")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout, b"govde\n")                 # headers stripped, no duplicate output
+        self.assertEqual(r.stdout, b"body\n")                 # headers stripped, no duplicate output
         self.assertGreaterEqual(time.time() - t, 1.0)           # honoured Retry-After: 1
         record = self.log()
         self.assertTrue(record[0]["limited"])
@@ -161,7 +161,7 @@ class FakeGhTest(unittest.TestCase):
     def test_etag_304_from_cache(self):
         r1 = self.gh("api", "repos/o/r", "--jq", ".x", mod="etag")
         r2 = self.gh("api", "repos/o/r", "--jq", ".x", mod="etag")
-        self.assertEqual((r1.stdout, r2.stdout, r2.returncode, r2.stderr), (b"govde\n", b"govde\n", 0, b""))
+        self.assertEqual((r1.stdout, r2.stdout, r2.returncode, r2.stderr), (b"body\n", b"body\n", 0, b""))
         self.assertIn("If-None-Match: W/\"e1\"", json.loads((self.tmp / "s" / "argv2").read_text()))
         self.assertTrue(self.log()[-1].get("cache"))
 
@@ -170,18 +170,18 @@ class FakeGhTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn(b"no pull requests found for branch", r.stderr)
         self.assertFalse((self.tmp / "s" / "n").exists())              # the real gh was never called
-        self.assertTrue(self.log()[-1]["short_devre"])
-        self.assertTrue(g.pr_short_devre(["pr", "status"]))
-        self.assertFalse(g.pr_short_devre(["pr", "view", "12"]))         # explicit PR number goes to GitHub
+        self.assertTrue(self.log()[-1]["short_circuit"])
+        self.assertTrue(g.pr_short_circuit(["pr", "status"]))
+        self.assertFalse(g.pr_short_circuit(["pr", "view", "12"]))         # explicit PR number goes to GitHub
 
     def test_stdin_buffered(self):
         r = self.gh("api", "graphql", "--input", "-", input_=b"{}")
-        self.assertEqual(r.stdout, b"govde-{}\n")
+        self.assertEqual(r.stdout, b"body-{}\n")
 
     def test_inner_ice_call_direct_passes(self):
         r = subprocess.run([sys.executable, "-I", str(TOOL), "run", "list"], env=dict(self.env, GH_LIMIT_ACTIVE="1"),
                            capture_output=True, timeout=30)
-        self.assertEqual(r.stdout, b"govde\n")
+        self.assertEqual(r.stdout, b"body\n")
         self.assertFalse((self.tmp / "d" / "log").exists())
 
     def test_kur_shim(self):
@@ -196,10 +196,10 @@ class FakeGhTest(unittest.TestCase):
                 if ps:
                     r = subprocess.run([ps, "-NoProfile", "-Command", "& '%s.ps1' run list" % target], env=self.env,
                                        capture_output=True, timeout=60)
-                    self.assertEqual(r.stdout.replace(b"\r\n", b"\n"), b"govde\n", r.stderr)
+                    self.assertEqual(r.stdout.replace(b"\r\n", b"\n"), b"body\n", r.stderr)
             else:
                 r = subprocess.run([str(target), "run", "list"], env=self.env, capture_output=True, timeout=30)
-                self.assertEqual(r.stdout, b"govde\n")
+                self.assertEqual(r.stdout, b"body\n")
             self.assertEqual(g.install(remove=True, target=target), 0)
             self.assertFalse(target.exists())
             self.assertFalse(Path(str(target) + ".ps1").exists())
@@ -221,7 +221,7 @@ class ShQTest(unittest.TestCase):
             self.assertEqual(r.stdout, "/tmp/a'b c", r.stderr)
 
 
-class LockVeProfileTest(unittest.TestCase):
+class LockAndProfileTest(unittest.TestCase):
     def test_lock_second_times_unavailable(self):
         d = Path(tempfile.mkdtemp())
         a = g.Lock(d / "slot.0", unblocked=True)
@@ -233,11 +233,11 @@ class LockVeProfileTest(unittest.TestCase):
         self.assertTrue(c.__enter__())           # released with the file
         c.__exit__()
 
-    def test_profile_block_idempotent_ve_back_taken(self):
+    def test_profile_block_idempotent_and_removable(self):
         path = Path(tempfile.mkdtemp()) / "PowerShell" / "profile.ps1"
         g.write_profile(path, Path("C:/Users/x/.local/bin"), False, "", False)
         once = path.read_text(encoding="utf-8")
-        self.assertIn(g.PROFILE_BAS, once)
+        self.assertIn(g.PROFILE_BEGIN, once)
         self.assertIn(str(Path("C:/Users/x/.local/bin")), once)
         g.write_profile(path, Path("C:/Users/x/.local/bin"), False, "", False)
         self.assertEqual(path.read_text(encoding="utf-8"), once)                  # second run changes nothing

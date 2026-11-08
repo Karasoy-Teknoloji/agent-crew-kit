@@ -64,10 +64,10 @@ def write(summary, message, cleaned=None):
 
 
 def cleaned_text(cleaned):
-    """'temizlendi: N worktree, M dal' for a list of removals, "" when there are none."""
+    """'cleaned: N worktree(s), M branch(es)' for a list of removals, "" when there are none."""
     w = sum(1 for c in cleaned if c.get("kind") == "worktree")
     b = sum(1 for c in cleaned if c.get("kind") == "branch")
-    return f"temizlendi: {w} worktree, {b} dal" if w or b else ""
+    return f"cleaned: {w} worktree(s), {b} branch(es)" if w or b else ""
 
 
 def cleaned_line(doc, max_age=86400):

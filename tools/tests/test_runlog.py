@@ -40,9 +40,9 @@ class DailyTest(unittest.TestCase):
     def test_writes_one_line_with_time_level_and_message(self):
         path = os.path.join(self.tmp, "sub", "a.log")
         lg, _ = self.lg(path=path)
-        lg.info("merhaba %s", "dünya")
+        lg.info("hello %s", "wérld")
         with open(path, encoding="utf-8") as f:
-            self.assertRegex(f.read(), r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d INFO merhaba dünya\n$")
+            self.assertRegex(f.read(), r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d INFO hello wérld\n$")
 
     def test_default_path_and_env_override_follow_the_name(self):
         self.assertTrue(G.log_path("lost-work").endswith(os.path.join(".local", "state", "lost-work.log")))
@@ -65,7 +65,7 @@ class DailyTest(unittest.TestCase):
         with mock.patch.object(G, "LOG_BYTES", 300), mock.patch.object(G, "LOG_BACKUP", 2):
             lg, _ = self.lg(path=path)
             for i in range(60):
-                lg.info("satir %d %s", i, "x" * 40)
+                lg.info("line %d %s", i, "x" * 40)
         files = sorted(os.listdir(self.tmp))
         self.assertEqual(files, ["r.log", "r.log.1", "r.log.2"])
 
@@ -83,7 +83,7 @@ class DailyTest(unittest.TestCase):
     def test_secrets_are_masked(self):
         path = os.path.join(self.tmp, "m.log")
         lg, _ = self.lg(path=path)
-        lg.error("clone https://kul:parola@github.com/x.git ghp_%s Bearer %s", "a" * 30, "b" * 24)
+        lg.error("clone https://usr:password@github.com/x.git ghp_%s Bearer %s", "a" * 30, "b" * 24)
         t = read(path)
         self.assertNotIn("password", t)
         self.assertNotIn("a" * 30, t)
@@ -109,9 +109,9 @@ class DailyTest(unittest.TestCase):
 
     def test_custom_format(self):
         path = os.path.join(self.tmp, "f.log")
-        lg, _ = self.lg(path=path, fmt="%(asctime)s [gorev] %(message)s")
-        lg.info("100% iş")
-        self.assertRegex(read(path), r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \[gorev\] 100% iş\n$")
+        lg, _ = self.lg(path=path, fmt="%(asctime)s [task] %(message)s")
+        lg.info("100% café")
+        self.assertRegex(read(path), r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \[task\] 100% café\n$")
 
 
 if __name__ == "__main__":

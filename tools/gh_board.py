@@ -2,19 +2,19 @@
 """Cheap GitHub Projects v2 helper: cached ids, batched board updates, rate display.
 
   python gh_board.py ids [--refresh]            # cache project/field/option ids in ~/.claude/gh-board-ids.json
-  python gh_board.py set --project N --status "Yapay Zeka" --priority low URL [URL...] [--dry-run]
+  python gh_board.py set --project N --status "AI queue" --priority low URL [URL...] [--dry-run]
   python gh_board.py set --file items.json      # [{"url":..,"project":9,"status":..,"priority":..}, ...]
   python gh_board.py status-count --project N     # item count per Status value (read-only)
-  python gh_board.py items --status "Yapay Zeka" [--project N ...]
+  python gh_board.py items --status "AI queue" [--project N ...]
                                                 # read-only JSON list of the issues in a Status (every cached board that has
                                                 # it, or the given ones): repo, number, title, url, state, labels, assignees,
                                                 # Priority name and rank (0 = most urgent on that board)
-  python gh_board.py add-status --project N "Yapay Zeka" [--color GRAY] [--description ""] [--before NAME] [--dry-run]
+  python gh_board.py add-status --project N "AI queue" [--color GRAY] [--description ""] [--before NAME] [--dry-run]
                                                 # add a Status option (at the end, or before option NAME), keeping all existing options AND their ids
   python gh_board.py sync-management [--dry-run]
-                                                # management view: every org issue labelled `management-takibi` (open + closed in
-                                                # the last 30 days) is mirrored into the org project "Yönetim Takibi" with
-                                                # "İlerleme %" computed from the issue itself and its sub-issues (compute_management); creates the label
+                                                # management view: every org issue labelled `management-tracking` (open + closed in
+                                                # the last 30 days) is mirrored into the org project "Management Tracking" with
+                                                # "Progress %" computed from the issue itself and its sub-issues (compute_management); creates the label
                                                 # in every repo, the project and its fields when missing; removes items whose
                                                 # label is gone or that closed over 30 days ago. Idempotent, GraphQL-batched
   python gh_board.py rate                       # GraphQL / REST remaining (REST call, free)
@@ -302,15 +302,15 @@ def add_cmd_status(a):
 
 
 # ---- management view: sync-management -------------------------------------------------------------------------------------
-LABEL = "management-takibi"
+LABEL = "management-tracking"
 LABEL_COLOR = "5319E7"
-LABEL_DESC = "Yönetimin ilerlemesini takip ettiği iş"
-YT_TITLE = "Yönetim Takibi"
-YT_PCT = "İlerleme %"
-YT_NOTE = "Not"
-YT_UPDATED = "Last güncelleme"   # the built-in "Updated" field is not offered on new projects, so the sync fills this date
-YT_VIEWS = (("Table", "table"), ("Clipboard", "board"))   # (name, layout) of the views the project must have
-NO_CHECKLIST = "checklist yok"
+LABEL_DESC = "Work whose progress management tracks"
+YT_TITLE = "Management Tracking"
+YT_PCT = "Progress %"
+YT_NOTE = "Note"
+YT_UPDATED = "Last updated"   # the built-in "Updated" field is not offered on new projects, so the sync fills this date
+YT_VIEWS = (("Table", "table"), ("Board", "board"))   # (name, layout) of the views the project must have
+NO_CHECKLIST = "no checklist"
 CLOSED_DAYS = 30
 SHARED_PROJECT = int(os.environ.get("GH_BOARD_TEST_QUEUE") or 0)   # config key: number of the org test-queue project (0 = none); never a source for the management Status
 YT_STATUSES = ["Todo", "In Progress", "In review", "Done"]   # same names as the product boards, so the product Status maps 1:1
@@ -338,13 +338,13 @@ def compute_management(issue):
     """(percent, note, Status name) for one issue dict from NODES_Q. The single % rule:
     closed issue or a product-board Status Done = 100 (Status comes only from product boards: the management project and the shared test-queue project are ignored); else (checked boxes + sum of the sub-issues' own % / 100) /
     (all boxes + number of sub-issues), recursive over the fetched sub-issue levels (deeper levels count closed/open as 1/0);
-    no checklist and no sub-issues = 0 with the note 'checklist yok'."""
+    no checklist and no sub-issues = 0 with the note 'no checklist'."""
     boards = [(n["project"]["number"], (n.get("status") or {}).get("name")) for n in issue["projectItems"]["nodes"] if n]
     names = {norm_name(st) for num, st in boards if st and num not in (issue.get("_self_project"), SHARED_PROJECT)}
     if issue["state"] == "CLOSED" or "done" in names:
         return 100, "", "Done"
-    # "cevap bekleniyor" = work blocked only on an outside reply: still started, so it maps to In Progress
-    status = "In review" if "in review" in names else "In Progress" if names & {"in progress", "cevap bekleniyor"} else "Todo"
+    # "awaiting reply" = work blocked only on an outside reply: still started, so it maps to In Progress
+    status = "In review" if "in review" in names else "In Progress" if names & {"in progress", "awaiting reply"} else "Todo"
     done, total = checklist_counts(issue["body"])
     summary = issue.get("subIssuesSummary") or {"total": 0, "completed": 0}
     fetched = (issue.get("subIssues") or {}).get("nodes")
@@ -369,9 +369,9 @@ YT_FIELDS_Q = """query($p:ID!){node(id:$p){...on ProjectV2{fields(first:50){node
   ...on ProjectV2FieldCommon{id name dataType}...on ProjectV2SingleSelectField{options{id name}}}}}}}"""
 YT_ITEMS_Q = """query($p:ID!,$c:String){node(id:$p){...on ProjectV2{items(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{id
   content{...on Issue{id url}}
-  pct:fieldValueByName(name:"İlerleme %"){...on ProjectV2ItemFieldNumberValue{number}}
-  upd:fieldValueByName(name:"Last güncelleme"){...on ProjectV2ItemFieldDateValue{date}}
-  note:fieldValueByName(name:"Not"){...on ProjectV2ItemFieldTextValue{text}}
+  pct:fieldValueByName(name:"Progress %"){...on ProjectV2ItemFieldNumberValue{number}}
+  upd:fieldValueByName(name:"Last updated"){...on ProjectV2ItemFieldDateValue{date}}
+  note:fieldValueByName(name:"Note"){...on ProjectV2ItemFieldTextValue{text}}
   status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{optionId}}}}}}}"""
 
 

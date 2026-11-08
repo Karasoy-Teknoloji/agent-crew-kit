@@ -12,7 +12,7 @@ TOOLS = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
 TOOL = "gh_board.py"     # stdlib only, imports hidden at the top (a missing hidden.py once raised ModuleNotFoundError: hidden)
 
 LOAD = ("import importlib.util, sys; s = importlib.util.spec_from_file_location('t', sys.argv[1]); m = importlib.util.module_from_spec(s); "
-        "s.loader.exec_module(m); g = m.hidden; r = g.run([sys.executable, '-c', 'print(7)'], capture_output=True, text=True, gorunur=True); "
+        "s.loader.exec_module(m); g = m.hidden; r = g.run([sys.executable, '-c', 'print(7)'], capture_output=True, text=True, visible=True); "
         "print(g.__name__, g.NO_WINDOW if hasattr(g, 'NO_WINDOW') else '?', r.stdout.strip(), g.flags(4))")
 
 

@@ -16,11 +16,11 @@ def missing(*_):
 
 
 class Table(unittest.TestCase):
-    def test_names_unique_ve_each_tool_one_path_present(self):
+    def test_names_unique_and_each_tool_one_path_present(self):
         names = [t.name for t in a.TOOLS]
         self.assertEqual(len(names), len(set(names)))
         for t in a.TOOLS:
-            self.assertIn(t.importance, (a.REQUIRED, a.RECOMMENDED, a.OPTIONAL_LINKED))
+            self.assertIn(t.importance, (a.REQUIRED, a.RECOMMENDED, a.OPTIONAL))
             self.assertTrue(t.winget or t.apt or t.brew or t.pip or t.manual, t.name)
             self.assertTrue(t.commands or t.pip, t.name)
 
@@ -43,21 +43,21 @@ class Commands(unittest.TestCase):
         k = a.install_commands(self.tool("pdftoppm"), "linux", "python3", pm="apt")
         self.assertEqual(k[0][-4:], ["apt-get", "install", "-y", "poppler-utils"][-4:])
 
-    def test_pip_user_windows_ve_apt_linux(self):
+    def test_pip_user_windows_and_apt_linux(self):
         pypdf = self.tool("pypdf")
         k = a.install_commands(pypdf, "windows", "C:/py/python.exe", pm="winget")
         self.assertEqual(k, [["C:/py/python.exe", "-m", "pip", "install", "--user", "pypdf"]])
         self.assertIn("python3-pypdf", a.install_commands(pypdf, "linux", "python3", pm="apt")[0])
 
-    def test_docker_ve_govc_never_automatic(self):
-        for os_ad, pm in (("windows", "winget"), ("linux", "apt"), ("macos", "brew")):
-            self.assertEqual(a.install_commands(self.tool("docker"), os_ad, "py", pm=pm), [])
+    def test_docker_and_govc_never_automatic(self):
+        for os_id, pm in (("windows", "winget"), ("linux", "apt"), ("macos", "brew")):
+            self.assertEqual(a.install_commands(self.tool("docker"), os_id, "py", pm=pm), [])
         self.assertEqual(a.install_commands(self.tool("govc"), "linux", "python3", pm="apt"), [])
 
 
 class Execute(unittest.TestCase):
     def fake_missing(self):
-        return mock.patch.object(a, "var_mi", side_effect=lambda t, py: t.name in ("git", "gh", "ssh", "curl", "python3"))
+        return mock.patch.object(a, "is_present", side_effect=lambda t, py: t.name in ("git", "gh", "ssh", "curl", "python3"))
 
     def test_default_only_report_no_install(self):
         output = []
@@ -90,11 +90,11 @@ class Execute(unittest.TestCase):
 
 class Tesseract(unittest.TestCase):
     def test_turkish_already_present(self):
-        with mock.patch.object(a, "tesseract_languages", return_value=("C:/t", {"eng", "turn"})), mock.patch.object(a, "run_cmd") as c:
+        with mock.patch.object(a, "tesseract_languages", return_value=("C:/t", {"eng", "tur"})), mock.patch.object(a, "run_cmd") as c:
             self.assertTrue(a.tesseract_turkish("windows", False, write=lambda s: None))
         c.assert_not_called()
 
-    def test_linux_apt_turn_package(self):
+    def test_linux_apt_tur_package(self):
         with mock.patch.object(a, "tesseract_languages", return_value=("/usr/share/tessdata", {"eng"})),                 mock.patch.object(a, "package_manager", return_value="apt"),                 mock.patch.object(a, "run_cmd", return_value=(0, [])) as c:
             self.assertTrue(a.tesseract_turkish("linux", False, write=lambda s: None))
         self.assertIn("tesseract-ocr-tur", c.call_args[0][0])
@@ -109,11 +109,11 @@ class Tesseract(unittest.TestCase):
             def download(language, dir_):
                 call.append(dir_)
                 if dir_ == system:
-                    return "izin yok"
+                    return "permission denied"
                 dir_.mkdir(parents=True, exist_ok=True)
-                (dir_ / "turn.traineddata").write_bytes(b"y")
+                (dir_ / "tur.traineddata").write_bytes(b"y")
                 return None
-            with mock.patch.object(a, "tesseract_languages", return_value=(str(system), {"eng"})),                     mock.patch.object(a, "download_turn_data", side_effect=download),                     mock.patch.object(a.Path, "home", return_value=ev), mock.patch.object(a, "run_cmd", return_value=(0, [])),                     mock.patch.dict(os.environ, {}, clear=False):
+            with mock.patch.object(a, "tesseract_languages", return_value=(str(system), {"eng"})),                     mock.patch.object(a, "download_language_data", side_effect=download),                     mock.patch.object(a.Path, "home", return_value=ev), mock.patch.object(a, "run_cmd", return_value=(0, [])),                     mock.patch.dict(os.environ, {}, clear=False):
                 self.assertTrue(a.tesseract_turkish("windows", False, write=lambda s: None))
                 self.assertEqual(os.environ["TESSDATA_PREFIX"], str(ev / ".local" / "share" / "tessdata"))
                 os.environ.pop("TESSDATA_PREFIX", None)

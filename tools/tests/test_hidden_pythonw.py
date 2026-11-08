@@ -73,7 +73,7 @@ class PythonwTest(unittest.TestCase):
         self.assertGreaterEqual(len(kids), 3)
         t = self.log_text()
         self.assertIn("start", t.lower())
-        self.assertRegex(t, r"(?i)summary|özet|done|scanned|repos")
+        self.assertRegex(t, r"(?i)summary|done|scanned|repos")
 
     def test_cost_save_share(self):
         """The 2-hourly job: totals recorded, then the row pushed to a (temp) remote through git; every git child windowless."""
@@ -81,11 +81,11 @@ class PythonwTest(unittest.TestCase):
         seed.mkdir()
         self.git(seed, "init", "-q", "-b", "main")
         (seed / "plugins" / "quota-pace").mkdir(parents=True)
-        (seed / "plugins" / "quota-pace" / "people.json").write_text(json.dumps({"test_person": {"name": "Test Kisi", "role": "developer"}}), encoding="utf-8")
+        (seed / "plugins" / "quota-pace" / "people.json").write_text(json.dumps({"test_person": {"name": "Test Person", "role": "developer"}}), encoding="utf-8")
         self.git(seed, "add", "-A")
         self.git(seed, "commit", "-q", "-m", "seed")
         self.git(self.tmp, "clone", "-q", "--bare", str(seed), str(remote))
-        env = {"CLAUDE_SHARED_PERSON": "Test Kisi", "CLAUDE_SHARED_PLAN": "100", "CLAUDE_SHARED_REMOTE": str(remote),
+        env = {"CLAUDE_SHARED_PERSON": "Test Person", "CLAUDE_SHARED_PLAN": "100", "CLAUDE_SHARED_REMOTE": str(remote),
                "CLAUDE_SHARED_CLONE": str(clone), "CLAUDE_SHARED_EFFICIENCY": "0", "COST_LOG": str(self.log)}
         kids, rc = self.pythonw(REPO / "plugins" / "quota-pace" / "bin" / "cost.py", "--save", "--share", env=env)
         t = self.log_text()

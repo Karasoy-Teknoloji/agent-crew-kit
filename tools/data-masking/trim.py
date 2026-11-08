@@ -8,14 +8,14 @@ MASKING: TCKN (Turkish national ID, with checksum), payment cards (Luhn), Turkis
 Turkish mobile/landline numbers are replaced by stable tokens built from a local keyed HMAC:
 [TCKN:ab12cd] [TEL:..] [EPOSTA:..] [IBAN:..] [KART:..]. The same value always gives the same token (so the model can still
 correlate rows) and the token cannot be reversed without the key. Masking runs before truncation and before the full
-output is stored under ~/.claude/tool-cikti/, so the stored copy is masked too.
+output is stored under ~/.claude/tool-output/, so the stored copy is masked too.
 
 Files (all created with mode 0600, nothing is shipped with the tool):
-  key file    ~/.claude/.maske-anahtari   random 32 bytes (hex), created on first use, never printed.
-              Override the location with KIRP_KEY_FILE.
-  count log   ~/.claude/maske-sayac.log   counts only, never values. Override with KIRP_COUNT_LOG.
-  allowlist   ~/.claude/maske-izinli.txt  e-mail domains / phone numbers that stay readable. Override with KIRP_ALLOWLIST.
-Switch masking off: KIRP_MASKE_KAPALI=1 (set it in the environment of the process that runs the hook, e.g. the "env"
+  key file    ~/.claude/.mask-key   random 32 bytes (hex), created on first use, never printed.
+              Override the location with TRIM_KEY_FILE.
+  count log   ~/.claude/mask-count.log   counts only, never values. Override with TRIM_COUNT_LOG.
+  allowlist   ~/.claude/mask-allowlist.txt  e-mail domains / phone numbers that stay readable. Override with TRIM_ALLOWLIST.
+Switch masking off: TRIM_MASK_CLOSED=1 (set it in the environment of the process that runs the hook, e.g. the "env"
 block of settings.json, not in a command the agent can write).
 
 Scope when installed as a Claude Code PostToolUse hook: Bash (successful calls only), MCP tools and any other tool (Grep ...)
@@ -25,16 +25,16 @@ fire, the raw output reaches the model), Read of repo files, images. Pipe such r
 Big output truncation: the full output goes to a file, the context gets the head, the tail and the error lines.
 
 Two modes:
-  python3 kirp.py --hook     PostToolUse hook. stdin: the hook JSON. When the output changed (masked and/or truncated) it
+  python3 trim.py --hook     PostToolUse hook. stdin: the hook JSON. When the output changed (masked and/or truncated) it
                              writes hookSpecificOutput.updatedToolOutput, otherwise nothing.
-  <command> 2>&1 | python3 kirp.py   filter: stdin -> stdout (use `set -o pipefail` in the shell to keep the exit code).
+  <command> 2>&1 | python3 trim.py   filter: stdin -> stdout (use `set -o pipefail` in the shell to keep the exit code).
 
 Truncation threshold: more than 250 lines or 30 KB. The first 60 and last 60 lines stay; error|fail|exception|traceback|fatal
-lines from the middle (at most 40) stay visible. The full output goes to ~/.claude/tool-cikti/<time>-<hash>.txt, files
-older than 7 days are deleted. Add a `# tam-cikti` comment to the command to skip truncation. Environment: KIRP_ESIK_SATIR,
-KIRP_ESIK_BAYT, KIRP_KAPALI=1 (truncation off), KIRP_MASKE_SURE (masking time budget, seconds).
+lines from the middle (at most 40) stay visible. The full output goes to ~/.claude/tool-output/<time>-<hash>.txt, files
+older than 7 days are deleted. Add a `# full-output` comment to the command to skip truncation. Environment: TRIM_THRESHOLD_LINE,
+TRIM_THRESHOLD_BYTES, TRIM_CLOSED=1 (truncation off), TRIM_MASK_DURATION (masking time budget, seconds).
 Fail closed: masking never lets text through unmasked. Text is masked in pieces (PARCA characters) under a time budget
-(KIRP_MASKE_SURE, default 7 s, hard maximum 20 s; the hook timeout is 30 s). A piece that is not finished when the budget
+(TRIM_MASK_DURATION, default 7 s, hard maximum 20 s; the hook timeout is 30 s). A piece that is not finished when the budget
 runs out, or that raises, is replaced by a one-line notice instead of being passed through. All patterns are linear-time.
 """
 import collections
@@ -48,29 +48,29 @@ import sys
 import time
 import unicodedata
 
-DIR = os.path.expanduser("~/.claude/tool-cikti")
-THRESHOLD_LINE = int(os.environ.get("KIRP_ESIK_SATIR", "250"))
-THRESHOLD_BYTES = int(os.environ.get("KIRP_ESIK_BAYT", "30000"))
+DIR = os.path.expanduser("~/.claude/tool-output")
+THRESHOLD_LINE = int(os.environ.get("TRIM_THRESHOLD_LINE", "250"))
+THRESHOLD_BYTES = int(os.environ.get("TRIM_THRESHOLD_BYTES", "30000"))
 BAS = LAST = 60
 ERROR_MAX = 40
 LINE_LENGTH = 600
 ERROR_RE = re.compile(r"error|fail|exception|traceback|fatal", re.I)
 # Commands whose full output the model needs or slices itself (git diff, head, tail ...): leave untouched.
 SKIP_RE = re.compile(
-    r"#\s*tam-cikti|\bgit\b[^|;&\n]{0,300}\b(diff|show|format-patch|blame)\b|\bgit\b[^|;&\n]{0,300}\blog\b[^|;&\n]{0,300}(-p\b|--patch|-u\b)"
+    r"#\s*full-output|\bgit\b[^|;&\n]{0,300}\b(diff|show|format-patch|blame)\b|\bgit\b[^|;&\n]{0,300}\blog\b[^|;&\n]{0,300}(-p\b|--patch|-u\b)"
     r"|(^|[|;&(\s])(diff|sed\s+-n|head|tail)\b")
 
 
 # ----------------------------------------------------------------------------- MASKING
-KEY_PATH = os.path.expanduser(os.environ.get("KIRP_KEY_FILE") or "~/.claude/.maske-anahtari")
-COUNTER_LOG = os.path.expanduser(os.environ.get("KIRP_COUNT_LOG") or "~/.claude/maske-sayac.log")
-PERMISSION_PATH = os.path.expanduser(os.environ.get("KIRP_ALLOWLIST") or "~/.claude/maske-izinli.txt")
+KEY_PATH = os.path.expanduser(os.environ.get("TRIM_KEY_FILE") or "~/.claude/.mask-key")
+COUNTER_LOG = os.path.expanduser(os.environ.get("TRIM_COUNT_LOG") or "~/.claude/mask-count.log")
+PERMISSION_PATH = os.path.expanduser(os.environ.get("TRIM_ALLOWLIST") or "~/.claude/mask-allowlist.txt")
 MASK_DURATION_MAX = 20.0  # the hook timeout is 30 s: the masking budget stays well below it, whatever the environment says
 try:
-    MASK_DURATION = min(float(os.environ.get("KIRP_MASKE_SURE", "7")), MASK_DURATION_MAX)  # seconds; the rest is withheld, never passed raw
+    MASK_DURATION = min(float(os.environ.get("TRIM_MASK_DURATION", "7")), MASK_DURATION_MAX)  # seconds; the rest is withheld, never passed raw
 except ValueError:
     MASK_DURATION = 7.0
-PART = 128_000  # text is masked in pieces of about this many characters, always cut after a newline (see _parcalar)
+PART = 128_000  # text is masked in pieces of about this many characters, always cut after a newline (see _parts)
 UNIT_MAX = 8_000_000  # a single line / PEM block longer than this is withheld instead of masked
 # Without SIGALRM (not the main thread of a POSIX process) the deadline is only checked between pieces: pieces and units stay small.
 PART_NO_ALARM = 16_000
@@ -263,42 +263,42 @@ def _gh_command(command):
             and not RE_GH_LOG.search(command))
 
 
-def _gh_location(text, bas, last):
-    """In the output of a single gh run/api call: is the number at metin[bas:son] in a run / job id position?"""
-    ls = text.rfind("\n", 0, bas) + 1
-    on = text[ls:bas]
+def _gh_location(text, start, last):
+    """In the output of a single gh run/api call: is the number at text[start:end] in a run / job id position?"""
+    ls = text.rfind("\n", 0, start) + 1
+    on = text[ls:start]
     if on.count("\t") == 6 and text[last:last + 1] in ("\t", "\n", ""):
         return True  # `gh run list` (not a terminal): STATUS CONCLUSION TITLE WORKFLOW BRANCH EVENT ID ELAPSED AGE
     if RE_GH_ONU.search(on[-8:]):
         return True
-    m = RE_ID_KEY.search(text[max(0, bas - 80):bas])
+    m = RE_ID_KEY.search(text[max(0, start - 80):start])
     return bool(m) and _key_norm(m.group(1)) in GH_ID_KEYS
 
 
-def _leaf_head(text, bas):
+def _leaf_head(text, start):
     """Is the number at the start of a dict leaf (only blanks / quotes before it)? Then the leaf key is its context."""
-    return _LEAF_KEY is not None and bas <= 4 and not text[:bas].strip(" \t\"'")
+    return _LEAF_KEY is not None and start <= 4 and not text[:start].strip(" \t\"'")
 
 
 def _key_norm(k):
     return RE_KEY_LIMIT.sub("_", k).lower().replace("-", "_").replace(".", "_").replace(" ", "_")
 
 
-def _tel_context(text, bas):
+def _tel_context(text, start):
     """Is a bare 5XXXXXXXXX number the value of a phone-like key? Only then it is masked as a phone number."""
-    if _leaf_head(text, bas):
+    if _leaf_head(text, start):
         return RE_TEL_KEY.search(_LEAF_KEY[-60:] + ":") is not None
-    return RE_TEL_KEY.search(text[max(0, bas - 60):bas]) is not None
+    return RE_TEL_KEY.search(text[max(0, start - 60):start]) is not None
 
 
-def _id_context(text, bas):
+def _id_context(text, start):
     """Is the number the value of an allowlisted CI id field (run_id=..., /runs/...)? Then it is not masked."""
-    if _leaf_head(text, bas):
+    if _leaf_head(text, start):
         return _key_norm(_LEAF_KEY) in ID_KEYS
-    on = text[max(0, bas - 80):bas]
+    on = text[max(0, start - 80):start]
     m = RE_ID_KEY.search(on)
     if m:
-        if m.start(1) == 0 and bas > len(on):
+        if m.start(1) == 0 and start > len(on):
             return False  # the key is cut off at the left edge of the look-back window: unknown, so mask
         k = RE_KEY_LIMIT.sub("_", m.group(1)).lower().replace("-", "_").replace(".", "_")
         if k in ID_KEYS:
@@ -322,7 +322,7 @@ _SIR_DEVE = (r"(?-i:(?<=[A-Za-z0-9])(?<!ancellation)(?:Password|Passwd|Pwd|Secre
 _SIR_BIG = r"(?-i:(?<=[A-Z0-9])(?:PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|PASSPHRASE))"
 # A suffix after the keyword starts with a separator, a digit or an upper-case letter: `aws_secret_access_key`, `SECRET_KEY`,
 # `secretKey`, `Password1`, `passwordConfirm`. `tokens`, `secretary`, `tokenizer` have none, so they are not keys.
-# A suffix whose last segment names metadata (`_min_length`, `_expiry`, `-name`, `SecretRef`) is dropped in _sir_key_mi.
+# A suffix whose last segment names metadata (`_min_length`, `_expiry`, `-name`, `SecretRef`) is dropped in _is_sir_key.
 _SIR_SUFFIX = r"(?:(?-i:[_.\-A-Z0-9])[\w.\-]{0,40})?"
 _SIR_KEY_TAM = (r"(?:(?:(?<![^\W_])(?:" + _SIR_KEY + r")|" + _SIR_DEVE + r"|" + _SIR_BIG + r")" + _SIR_SUFFIX
                 + r"|(?<!\w)pass)")
@@ -336,7 +336,7 @@ RE_SIR_SEGMENT = re.compile(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])")
 RE_SIR_STRONG = re.compile(r"(?i)passw|passphrase|secret|sifre|şifre|parola|key")
 
 
-def _sir_key_mi(k):
+def _is_sir_key(k):
     """Is the matched key a credential key? False when its last segment names metadata (`password_min_length`, `token_type`)."""
     seg = RE_SIR_SEGMENT.findall(k)
     return not (len(seg) > 1 and seg[-1].lower() in SIR_SUFFIX_OUTSIDE)
@@ -414,7 +414,7 @@ _SIR_SHAPES = (
     (("Private-Lines:",), r"Private-Lines:.*?(?:Private-MAC:[^\r\n]*|\Z)"),  # PuTTY .ppk private part
 )
 RE_SIR_SHAPE = tuple((marker, re.compile(pattern, re.S)) for marker, pattern in _SIR_SHAPES)
-RE_SIR_ON_KONTROL = re.compile(
+RE_SIR_PRECHECK = re.compile(
     r"(?i)pass|pwd|secret|token|api.?key|authorization|private|sifre|şifre|parola|anahtar|hv[sb]\.|gh[pousr]_|github_pat_|cfut_|AKIA|xox[abprs]-"
     r"|key|cookie|eyJ|sk-|glpat-|AIza|_live_|_test_|npm_|ASIA|hooks\.slack|--user|-u[ \t=]|-U[ \t]|[?&]sig=|signature|x-amz-|x-goog-|machine")
 # Authorization header / field with ANY scheme (`Token`, `Digest ...`, `AWS4-HMAC-SHA256 Credential=..., Signature=...`, none):
@@ -540,7 +540,7 @@ def _mask_out_sir(t, say):
 
     def kv(m):
         k = m.group("k")
-        if not _sir_key_mi(k) or "uthorization" in k or "UTHORIZATION" in k:
+        if not _is_sir_key(k) or "uthorization" in k or "UTHORIZATION" in k:
             return m.group(0)  # metadata key; an Authorization value is RE_SIR_AUTH's job
         g = next((x for x in ("d", "s", "e", "e3", "e4", "e5", "u") if m.group(x) is not None), None)
         v = m.group(g)
@@ -574,7 +574,7 @@ def _mask_out_sir(t, say):
             if v is None:
                 return m.group(0)
             if g == "v" and m.re is RE_SIR_YAML:
-                if not _sir_key_mi(m.group("k")):
+                if not _is_sir_key(m.group("k")):
                     return m.group(0)
                 c = re.search(r"[ \t]#", v)
                 if c:
@@ -593,7 +593,7 @@ def _mask_out_sir(t, say):
             k = m.group("k")
         except IndexError:
             k = None
-        if k is not None and not _sir_key_mi(k):
+        if k is not None and not _is_sir_key(k):
             return m.group(0)
         g = next((x for x in ("d", "s", "u") if x in m.re.groupindex and m.group(x) is not None), None)
         if g is None:
@@ -615,7 +615,7 @@ def _mask_out_sir(t, say):
     def code(m):
         """Value literal of a code pair (`Add("X-API-Key", "v")`, `NetworkCredential("u", "v")`); a scheme word (`Bearer `) stays."""
         k = m.groupdict().get("k")
-        if k is not None and k.lower() not in ("bearer", "basic") and not RE_SIR_TITLE_FULL.fullmatch(k) and not _sir_key_mi(k):
+        if k is not None and k.lower() not in ("bearer", "basic") and not RE_SIR_TITLE_FULL.fullmatch(k) and not _is_sir_key(k):
             return m.group(0)
         g = next((x for x in ("vb", "d", "s") if m.group(x) is not None), None)
         if g is None:
@@ -717,7 +717,7 @@ def _mask_out_table(t, say):
         order = []
         for j, h in enumerate(title):
             mm = RE_SIR_COLUMN.fullmatch(h.rstrip("\r"))
-            if mm and _sir_key_mi(mm.group("k")):
+            if mm and _is_sir_key(mm.group("k")):
                 order.append(j)
         i += 1
         if not order:
@@ -743,7 +743,7 @@ def _resolve_key(t):
         if "\\u" not in k:
             return m.group(0)
         d = RE_UESC.sub(lambda x: chr(int(x.group(1), 16)), k)
-        if not RE_SIR_ON_KONTROL.search(d) or re.search(r'["\\\x00-\x1f\ud800-\udfff]', d):
+        if not RE_SIR_PRECHECK.search(d) or re.search(r'["\\\x00-\x1f\ud800-\udfff]', d):
             return m.group(0)
         return '"' + d + '"'
     return RE_ESC_KEY.sub(f, t)
@@ -755,12 +755,12 @@ RE_ANSI = re.compile(
     r"\x1b\[[0-?]*[ -/]*[@-~]|\x9b[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b\n]{0,2000}(?:\x07|\x1b\\)?|\x1b[()][0-9A-Za-z]|\x1b[@-Z\\-_]")
 # invisible characters between digits (`1234<ZWSP>5678901`, LRM, NUL, backspace, CR, combining marks): every Unicode Cf / Cc /
 # Mn / Me character except newline and tab is removed there. Blanks and dashes stay: the patterns treat them as separators.
-RE_ARA = re.compile(r"(?<=\d)[^\w\n\t !-~]{1,8}(?=\d)")
-RE_KONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+RE_BETWEEN = re.compile(r"(?<=\d)[^\w\n\t !-~]{1,8}(?=\d)")
+RE_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _INVISIBLE_TURN = frozenset(("Cf", "Cc", "Mn", "Me"))
 
 
-def _ara_sil(m):
+def _drop_between(m):
     g = m.group(0)
     return "" if all(unicodedata.category(c) in _INVISIBLE_TURN for c in g) else g
 
@@ -781,8 +781,8 @@ def _normalle(t):
     non-ASCII decimal digits written as ASCII digits (one for one)."""
     if "\x1b" in t or "\x9b" in t:
         t = RE_ANSI.sub("", t)
-    if not t.isascii() or RE_KONTROL.search(t):
-        t = RE_ARA.sub(_ara_sil, t)
+    if not t.isascii() or RE_CONTROL.search(t):
+        t = RE_BETWEEN.sub(_drop_between, t)
     if not t.isascii():
         if RE_DIGIT_OTHER.search(t):
             t = t.translate(_digit_table())
@@ -1039,12 +1039,12 @@ class _TimeOverrun(Exception):
     pass
 
 
-def _alarm_isle(signum, frame):
+def _alarm_handler(signum, frame):
     raise _TimeOverrun()
 
 
 class _time_cap:
-    """Interrupt the body with _ZamanAsimi after `saniye` seconds (SIGALRM; CPython's regex engine checks signals while it
+    """Interrupt the body with _TimeOverrun after `seconds` seconds (SIGALRM; CPython's regex engine checks signals while it
     matches). This is the second line of defence behind the linear-time patterns; it only works in the main thread of a
     POSIX process and silently does nothing elsewhere (the piece-wise budget check still applies)."""
 
@@ -1054,7 +1054,7 @@ class _time_cap:
     def __enter__(self):
         try:
             import signal
-            self.old = signal.signal(signal.SIGALRM, _alarm_isle)
+            self.old = signal.signal(signal.SIGALRM, _alarm_handler)
             signal.setitimer(signal.ITIMER_REAL, max(self.seconds, 0.001))
             self.enabled = True
         except Exception:
@@ -1075,10 +1075,10 @@ RE_NAME_LINE = re.compile(r"[ \t]*(?:-[ \t]+)?[\"']?(?:name|key)[\"']?[ \t]*:", 
 
 def _parts(text, size=None):
     """(start, end) pairs of pieces for piece-wise masking. A match must never straddle a cut, so a piece always ends after a
-    newline (or at the end of the text): about PARCA characters, but a line longer than that is kept whole (the patterns are
+    newline (or at the end of the text): about PART characters, but a line longer than that is kept whole (the patterns are
     linear-time), a piece that ends inside a `-----BEGIN` block is extended past the matching `-----END` line (or to the end
     of the text when there is none, as the pattern itself would mask it), and a piece never ends between a `key:` line and its value line;
-    both rules repeat until the cut stops moving. maskele() withholds a piece over BIRIM_AZAMI."""
+    both rules repeat until the cut stops moving. mask_out() withholds a piece over UNIT_MAX."""
     n, i = len(text), 0
     while i < n:
         j = min(i + (size or PART), n)
@@ -1107,7 +1107,7 @@ def _parts(text, size=None):
             else:
                 ls = text.rfind("\n", i, j - 1) + 1
                 last = text[ls:j].rstrip()
-                if (last.endswith(":") or RE_NAME_LINE.match(last)) and RE_SIR_ON_KONTROL.search(last):
+                if (last.endswith(":") or RE_NAME_LINE.match(last)) and RE_SIR_PRECHECK.search(last):
                     k = text.find("\n", j)
                     j = n if k < 0 else k + 1
             if j == j0:
@@ -1167,7 +1167,7 @@ def mask_out(text):
     line, and a piece that raises is replaced by a notice. Counter key ATLANDI counts withheld parts."""
     global _BUDGET_DONE
     say = collections.Counter()
-    if not isinstance(text, str) or not text or os.environ.get("KIRP_MASKE_KAPALI") == "1":
+    if not isinstance(text, str) or not text or os.environ.get("TRIM_MASK_CLOSED") == "1":
         return text, say
     end_at = _END_AT if _END_AT is not None else time.monotonic() + MASK_DURATION
     if len(text) <= SHORT:
@@ -1227,9 +1227,9 @@ _NODE = [0]
 BUDGET_NOTE = "[mask: time budget exceeded, the rest of the tool output is withheld]"
 
 
-def _budget_done_mi():
+def _budget_is_done():
     """In the hook (process-wide budget): is the budget spent? Checked by the clock every 1024 tree nodes as well, so a tree of
-    numbers (which never reaches maskele) stops too."""
+    numbers (which never reaches mask_out) stops too."""
     global _BUDGET_DONE
     if _END_AT is None:
         return False
@@ -1254,7 +1254,7 @@ def _add_not(o):
 
 
 def _mask_out_leaf(o, key):
-    """Mask one string leaf; a short leaf gets its dict key as context (see _yaprak_basi)."""
+    """Mask one string leaf; a short leaf gets its dict key as context (see _leaf_head)."""
     global _LEAF_KEY
     if key is None or len(o) > 1000:
         return mask_out(o)
@@ -1300,7 +1300,7 @@ def _mask_out_tree(o, say, key=None):
     if isinstance(o, list):
         result, ch = [], False
         for x in o:
-            if _budget_done_mi():
+            if _budget_is_done():
                 say["ATLANDI"] += 1
                 ch = True
                 break
@@ -1321,9 +1321,9 @@ def _mask_out_tree(o, say, key=None):
             return (result, True) if ch else (o, False)
         result, ch = {}, False
         for k, x in o.items():
-            if _budget_done_mi():
+            if _budget_is_done():
                 # budget spent: only the envelope's fixed keys stay (value withheld), so the response keeps its shape; the rest
-                # of this dict is dropped and _genel / _bash add ONE notice for everything left out
+                # of this dict is dropped and _general / _bash add ONE notice for everything left out
                 say["ATLANDI"] += 1
                 ch = True
                 if k in STRUCTURE_KEYS and k not in result:
@@ -1354,7 +1354,7 @@ def _say_log(tool, say):
     try:
         if not say:
             return
-        line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')} arac={tool} " + " ".join(f"{k}={v}" for k, v in sorted(say.items())) + "\n"
+        line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')} tool={tool} " + " ".join(f"{k}={v}" for k, v in sorted(say.items())) + "\n"
         try:
             if os.path.getsize(COUNTER_LOG) > 1_000_000:
                 with open(COUNTER_LOG, encoding="utf-8", errors="replace") as f:
@@ -1372,7 +1372,7 @@ def _say_log(tool, say):
 def _write_file_masked(path, text):
     """Replace the raw copy (Claude Code's persisted output file) by the masked text: temp file + atomic rename."""
     try:
-        temp = f"{path}.maske{os.getpid()}"
+        temp = f"{path}.mask{os.getpid()}"
         mod = os.stat(path).st_mode & 0o777
         with open(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mod or 0o600), "w", encoding="utf-8") as f:
             f.write(text)
@@ -1427,7 +1427,7 @@ def shorten(s):
 
 def trim(text, source=None):
     """Return (new_text, truncated). Below the threshold the text comes back unchanged and no file is written.
-    kaynak: path of a file that already holds the whole text (hook mode, persistedOutputPath)."""
+    source: path of a file that already holds the whole text (hook mode, persistedOutputPath)."""
     lines = text.split("\n")
     at_end_bos = lines and lines[-1] == ""
     if at_end_bos:
@@ -1451,7 +1451,7 @@ def trim(text, source=None):
     return "\n".join(output) + ("\n" if at_end_bos else ""), True
 
 
-MASK_READ_DIRS = ("/tmp/", os.path.expanduser("~/.claude/tool-cikti/"), os.path.expanduser("~/.claude/projects/"),
+MASK_READ_DIRS = ("/tmp/", os.path.expanduser("~/.claude/tool-output/"), os.path.expanduser("~/.claude/projects/"),
                        os.path.expanduser("~/Downloads/"), os.path.expanduser("~/downloads/"))
 
 
@@ -1474,7 +1474,7 @@ def _bash(d):
     skip = bool(SKIP_RE.search(command))
     global _GH_IDENTITY
     _GH_IDENTITY = _gh_command(command)
-    trimming_closed = os.environ.get("KIRP_KAPALI") == "1"
+    trimming_closed = os.environ.get("TRIM_CLOSED") == "1"
     new = dict(answer)
     changed = False
     total = collections.Counter()
@@ -1675,7 +1675,7 @@ def hook():
 
 def filter_fn():
     data = sys.stdin.buffer.read().decode("utf-8", "replace")
-    _start_budget()  # after the input is read: `(sleep 8; echo ...) | kirp.py` must not use up the budget while waiting
+    _start_budget()  # after the input is read: `(sleep 8; echo ...) | trim.py` must not use up the budget while waiting
     try:
         data, _ = mask_out(data)
     except BaseException:

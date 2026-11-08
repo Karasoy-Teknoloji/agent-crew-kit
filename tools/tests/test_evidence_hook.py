@@ -1,4 +1,4 @@
-"""Tests for tools/kanit_kancasi.py (Stop hook that blocks hedge words in the assistant's last message).
+"""Tests for tools/evidence_hook.py (Stop hook that blocks hedge words in the assistant's last message).
 
 Run: python -m unittest discover -s tools/tests
 """
@@ -12,9 +12,9 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent / "kanit_kancasi.py"
+SCRIPT = Path(__file__).resolve().parent.parent / "evidence_hook.py"
 LOGDIR = tempfile.TemporaryDirectory()
-LOG = Path(LOGDIR.name) / "kanit-kancasi.log"
+LOG = Path(LOGDIR.name) / "evidence-hook.log"
 
 
 # The hook under a forced cp1252 code page: stdio wrappers and the locale encoding are cp1252 (like Windows cp1252/cp1254),
@@ -34,7 +34,7 @@ CP1252_RUNNER = (
 
 def run(payload, raw=None, cp1252=False):
     stdin = raw if raw is not None else json.dumps(payload, ensure_ascii=False)
-    env = {**os.environ, "KANIT_KANCASI_LOG": str(LOG)}
+    env = {**os.environ, "EVIDENCE_HOOK_LOG": str(LOG)}
     cmd = [sys.executable, "-I", "-c", CP1252_RUNNER, str(SCRIPT)] if cp1252 else [sys.executable, "-I", str(SCRIPT)]
     p = subprocess.run(cmd, input=stdin.encode("utf-8"), capture_output=True, timeout=10, env=env)
     return p.returncode, p.stdout.decode("utf-8"), p.stderr.decode("utf-8")
@@ -52,7 +52,7 @@ class Hook(unittest.TestCase):
                      "It is probably the host.", "Presumably fine.", "Galiba bu.", "Herhalde evet.", "olsa  gerek"]:
             r = blocked(text)
             self.assertEqual(r["decision"], "block", text)
-            self.assertIn("doğrulanmadı", r["reason"])
+            self.assertIn("unverified", r["reason"])
 
     def test_reason_names_the_word(self):
         self.assertIn("'muhtemelen'", blocked("Bu muhtemelen yanlış")["reason"])
@@ -106,7 +106,7 @@ class Hook(unittest.TestCase):
             for payload, raw in [({"transcript_path": str(bad)}, None), ({"transcript_path": str(Path(d) / "yok")}, None),
                                  ({}, None), (None, "not json"), (None, ""), ([1], None), ({"transcript_path": 5}, None)]:
                 self.assertEqual(run(payload, raw), (0, "", ""), (payload, raw))
-        self.assertIn("kanit_kancasi allowed after error", LOG.read_text(encoding="utf-8"))  # errors leave a log line
+        self.assertIn("evidence_hook allowed after error", LOG.read_text(encoding="utf-8"))  # errors leave a log line
 
 
 def bash(cmd):
@@ -118,7 +118,7 @@ RESULT = {"type": "user", "message": {"content": [{"type": "tool_result", "conte
 
 
 class AccessClaims(unittest.TestCase):
-    """The access-claim check: a missing-access claim needs a `kasa.py bul` run in the same turn (or a cite in the message)."""
+    """The access-claim check: a missing-access claim needs a `vault_cli.py find` run in the same turn (or a cite in the message)."""
 
     def hook(self, msg, rows, event="Stop", **extra):
         with tempfile.TemporaryDirectory() as d:
@@ -130,7 +130,7 @@ class AccessClaims(unittest.TestCase):
             self.assertEqual((code, err), (0, ""))
             return json.loads(out) if out.strip() else None
 
-    def test_claims_without_bul_block(self):
+    def test_claims_without_find_block(self):
         rows = [PROMPT, bash("curl -s https://x/api/v1/bilgisayarlar"), RESULT]
         for msg in ["GET /api/v1/bilgisayarlar 403 verdi; Vault'taki tek PAT'in okuma yetkisi yok.",
                     "Token yok, bir token verir misin?", "Bu işlem için izin gerekiyor.", "Erişimim yok.",
@@ -141,31 +141,31 @@ class AccessClaims(unittest.TestCase):
                     "Token yok, ekipten istemek gerekiyor.", "Yetki gerekiyor, verir misiniz?", "permission denied, need a token"]:
             r = self.hook(msg, rows)
             self.assertEqual(r["decision"], "block", msg)
-            self.assertIn("kasa.py bul", r["reason"])
+            self.assertIn("vault_cli.py find", r["reason"])
 
     def test_reason_names_the_claim(self):
         r = self.hook("Bu arada yetkimiz yok.", [PROMPT])
         self.assertIn("'yetkimiz yok'", r["reason"])
 
-    def test_bul_run_in_this_turn_allows_the_claim(self):
-        for cmd in ["python3 tools/kasa.py bul panel okuma", "kasa bul wazuh", "~/.claude/bin/kasa.py bul lisans"]:
+    def test_find_run_in_this_turn_allows_the_claim(self):
+        for cmd in ["python3 tools/vault_cli.py find panel okuma", "vault_cli find wazuh", "~/.claude/bin/vault_cli.py find lisans"]:
             rows = [PROMPT, bash(cmd), RESULT, bash("curl ..."), RESULT]
             self.assertIsNone(self.hook("Okuma token'ıyla da 403 aldım, yetkimiz yok.", rows), cmd)
 
-    def test_bul_from_an_earlier_turn_does_not_count(self):
-        rows = [PROMPT, bash("kasa.py bul lisans"), RESULT, PROMPT, bash("curl ..."), RESULT]  # no timestamps: age unknown
+    def test_find_from_an_earlier_turn_does_not_count(self):
+        rows = [PROMPT, bash("vault_cli.py find lisans"), RESULT, PROMPT, bash("curl ..."), RESULT]  # no timestamps: age unknown
         self.assertEqual(self.hook("403 aldım, yetkimiz yok.", rows)["decision"], "block")
 
     def test_tool_results_do_not_start_a_new_turn(self):
-        rows = [PROMPT, bash("kasa.py bul lisans"), RESULT, bash("curl"), RESULT, bash("curl2"), RESULT]
+        rows = [PROMPT, bash("vault_cli.py find lisans"), RESULT, bash("curl"), RESULT, bash("curl2"), RESULT]
         self.assertIsNone(self.hook("403 aldım, yetkimiz yok.", rows))
 
     def test_citing_the_search_in_the_message_allows_it(self):
-        msg = "Aramalar: `kasa.py bul panel okuma` -> claude-okuma, claude-otomasyon-publish; ikisiyle de 403 aldım."
+        msg = "Aramalar: `vault_cli.py find panel okuma` -> claude-okuma, claude-otomasyon-publish; ikisiyle de 403 aldım."
         self.assertIsNone(self.hook(msg, [PROMPT]))
 
     def test_external_status_report_is_not_a_claim(self):
-        rows = [PROMPT, bash("curl https://sandbox.example/api"), RESULT]  # no bul anywhere
+        rows = [PROMPT, bash("curl https://sandbox.example/api"), RESULT]  # no find anywhere
         for msg in ["8 istek 401 döndü (İYS sandbox), kalan 12 istek 200.", "The API returned 403 Forbidden.",
                     "HTTP 401 Unauthorized döndü; kimlik doğrulanamadı, yanıt gövdesi boş.", "Lisans API -> 403",
                     "GET /x 403 verdi, sunucu Forbidden yanıtı gönderdi."]:
@@ -182,17 +182,17 @@ class AccessClaims(unittest.TestCase):
             return {**row, "timestamp": ts}
 
         for ago, expect_block in [(1, False), (5, True)]:
-            rows = [at(ago + 0.1, PROMPT), at(ago, bash("python3 tools/kasa.py bul iys")), at(ago, RESULT),
+            rows = [at(ago + 0.1, PROMPT), at(ago, bash("python3 tools/vault_cli.py find iys")), at(ago, RESULT),
                     at(0.2, PROMPT), at(0.1, bash("curl x")), at(0.1, RESULT)]
             r = self.hook(claim, rows)
             self.assertEqual(r is not None, expect_block, ago)
-        cite = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Aradım: `kasa.py bul ahs` -> 1 kayıt."}]}}
+        cite = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Aradım: `vault_cli.py find ahs` -> 1 kayıt."}]}}
         rows = [at(1, PROMPT), at(1, cite), at(0.2, PROMPT), at(0.1, bash("curl x")), at(0.1, RESULT)]
         self.assertIsNone(self.hook(claim, rows))  # citation in an earlier assistant message
         rows[1] = at(5, cite)
         self.assertEqual(self.hook(claim, rows)["decision"], "block")
         rows = [PROMPT, bash("curl x"), RESULT]
-        self.assertEqual(self.hook(claim, rows)["decision"], "block")  # no bul anywhere
+        self.assertEqual(self.hook(claim, rows)["decision"], "block")  # no find anywhere
 
     def test_quoted_evidence_and_normal_numbers_pass(self):
         rows = [PROMPT]
@@ -208,12 +208,12 @@ class AccessClaims(unittest.TestCase):
     def test_subagent_uses_its_own_transcript(self):
         with tempfile.TemporaryDirectory() as d:
             parent, agent = Path(d) / "p.jsonl", Path(d) / "a.jsonl"
-            parent.write_text(json.dumps(PROMPT) + "\n" + json.dumps(bash("kasa.py bul x")) + "\n")
+            parent.write_text(json.dumps(PROMPT) + "\n" + json.dumps(bash("vault_cli.py find x")) + "\n")
             agent.write_text(json.dumps(PROMPT) + "\n" + json.dumps(bash("curl")) + "\n")
             payload = {"hook_event_name": "SubagentStop", "transcript_path": str(parent), "agent_transcript_path": str(agent),
                        "last_assistant_message": "403, yetki yok", "agent_id": "a1", "agent_type": "quick-task-hm"}
-            self.assertEqual(json.loads(run(payload)[1])["decision"], "block")  # the parent's bul does not help the subagent
-            agent.write_text(json.dumps(PROMPT) + "\n" + json.dumps(bash("kasa.py bul lisans")) + "\n")
+            self.assertEqual(json.loads(run(payload)[1])["decision"], "block")  # the parent's find does not help the subagent
+            agent.write_text(json.dumps(PROMPT) + "\n" + json.dumps(bash("vault_cli.py find lisans")) + "\n")
             self.assertEqual(run(payload)[1].strip(), "")
 
     def test_claim_in_subagent_handback_report_blocks(self):
@@ -230,12 +230,12 @@ class AccessClaims(unittest.TestCase):
     def test_hedge_and_access_reasons_are_combined(self):
         r = self.hook("Muhtemelen token yok.", [PROMPT])
         self.assertIn("'muhtemelen'", r["reason"])
-        self.assertIn("kasa.py bul", r["reason"])
+        self.assertIn("vault_cli.py find", r["reason"])
         self.assertEqual(r["reason"].count("COMPLETE final report"), 1)
 
     def test_access_block_reason_asks_for_full_restate(self):
         r = self.hook("403 aldım, yetkimiz yok.", [PROMPT])
-        self.assertIn("kasa.py bul", r["reason"])
+        self.assertIn("vault_cli.py find", r["reason"])
         self.assertIn("Then write your COMPLETE final report again in your next message", r["reason"])
         self.assertIn("do not refer to 'the report above'", r["reason"])
 
@@ -257,7 +257,8 @@ PROPOSAL = say("Önerim: eşiği 5'e indirelim, karantina bildirimini kapatalım
 
 
 class Decisions(unittest.TestCase):
-    """Decision check (Stop only): a decision in the user's prompt needs a GitHub record in the turn or a `Karar kaydı:` line."""
+    """Decision check (Stop only): a decision in the user's prompt needs a GitHub record in the turn or a `Decision record:` line (the old Turkish `Karar kaydı:` form is still accepted).
+    The chat samples below are Turkish on purpose: the hook reads Turkish and English chat."""
 
     def hook(self, msg, rows, event="Stop", cp1252=False, **extra):
         with tempfile.TemporaryDirectory() as d:
@@ -276,7 +277,7 @@ class Decisions(unittest.TestCase):
                        "Eski endpoint kalsın.", "İptal, gerek yok.", "Başla.", "Go ahead with option B."]:
             r = self.hook("Anlaşıldı, öyle yapıyorum.", [say("Durum."), human(prompt), say("Anlaşıldı, öyle yapıyorum.")])
             self.assertEqual(r["decision"], "block", prompt)
-            self.assertIn("Karar kaydı: yok", r["reason"])
+            self.assertIn("Decision record: none", r["reason"])
             self.assertIn("team decisions issue", r["reason"])
 
     def test_decision_recorded_with_gh_comment_allows(self):
@@ -304,10 +305,15 @@ class Decisions(unittest.TestCase):
 
     def test_decision_record_line_allows(self):
         rows = [human("Bunu yapalım.")]
-        for msg in ["Yaptım.\nKarar kaydı: https://github.com/example-org/ops/issues/14#issuecomment-123",
+        for msg in ["Done.\nDecision record: https://github.com/example-org/ops/issues/14#issuecomment-123",
+                    "Decision record: agent is writing", "Ok.\nDECISION RECORD: none (chat-only preference)",
+                    "Decision record: none (not a decision)",
+                    # the old Turkish forms stay accepted as input
+                    "Yaptım.\nKarar kaydı: https://github.com/example-org/ops/issues/14#issuecomment-123",
                     "Karar kaydı: ajan yazıyor", "Tamam.\nKARAR KAYDI: yok (sohbet içi tercih)", "Karar kaydi: yok (karar değil)"]:
             self.assertIsNone(self.hook(msg, rows), msg)
-        for msg in ["Karar kaydı: yok", "Karar kaydı: yok ()", "Karar kaydı: https://example.com/x"]:
+        for msg in ["Decision record: none", "Decision record: none ()", "Decision record: https://example.com/x",
+                    "Karar kaydı: yok", "Karar kaydı: yok ()", "Karar kaydı: https://example.com/x"]:
             self.assertEqual(self.hook(msg, rows)["decision"], "block", msg)
 
     def test_question_is_not_a_decision(self):
@@ -326,7 +332,8 @@ class Decisions(unittest.TestCase):
 
     def test_decision_record_missing_question_allows(self):
         rows = [human("önceliklerini artıralım")]
-        for msg in ["Durum özeti.\nKarar kaydı: yok (soru)", "Karar kaydi: yok (soru)", "karar KAYDI: yok (soru)",
+        for msg in ["Status summary.\nDecision record: none (question)", "decision RECORD: none (question)",
+                    "Durum özeti.\nKarar kaydı: yok (soru)", "Karar kaydi: yok (soru)", "karar KAYDI: yok (soru)",
                     unicodedata.normalize("NFD", "Karar kaydı: yok (soru)"), "KARAR KAYDİ: yok (soru)"]:
             self.assertIsNone(self.hook(msg, rows), msg)
 
@@ -337,8 +344,8 @@ class Decisions(unittest.TestCase):
         self.assertIsNone(self.hook(None, rows + [say("Yaptım.\nKarar kaydı: yok (soru)")], cp1252=True))
         r = self.hook("Uyguluyorum, öncelik değişti.", rows, cp1252=True)
         self.assertEqual(r["decision"], "block")
-        self.assertIn("Karar kaydı", r["reason"])  # ASCII-escaped JSON keeps the letters intact
-        self.assertIn("Ürün kararları", r["reason"])
+        self.assertIn("Decision record", r["reason"])
+        self.assertIn("Product decisions", r["reason"])
         self.assertIsNone(self.hook("Cevap.", [human("şimdi en öncelikli işler ne durumda")], cp1252=True))
 
     def test_short_approval_after_proposal_blocks_unless_recorded(self):
@@ -379,7 +386,7 @@ class Decisions(unittest.TestCase):
     def test_decision_reason_combines_with_hedge(self):
         r = self.hook("Muhtemelen olur.", [human("Erteleyelim.")])
         self.assertIn("'muhtemelen'", r["reason"])
-        self.assertIn("Karar kaydı", r["reason"])
+        self.assertIn("Decision record", r["reason"])
         self.assertEqual(r["reason"].count("COMPLETE final report"), 1)
 
 

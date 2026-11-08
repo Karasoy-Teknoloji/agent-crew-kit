@@ -59,4 +59,4 @@ macOS uses `brew install <name>` for the same tools (`poppler`, `jq`, `shellchec
 
 ## Adding a tool
 
-Add one `Arac(...)` line to `TOOLS` in `tools/tool_check.py` (commands to probe, level, winget id, apt package, optional brew / pip) and one row to the table above. There is no second list: the installers, the report and the tests read `TOOLS`.
+Add one `Tool(...)` line to `TOOLS` in `tools/tool_check.py` (commands to probe, level, winget id, apt package, optional brew / pip) and one row to the table above. There is no second list: the installers, the report and the tests read `TOOLS`.

@@ -165,8 +165,8 @@ class FakeVaultTests(unittest.TestCase):
     def test_check_and_fields_never_show_value(self):
         rc, out, _ = self.run_main(["check", "secret/app/db#password", "secret/app/db#nope"])
         self.assertEqual(rc, 1)
-        self.assertIn("secret/app/db#password: var (%d karakter)" % len(SECRET), out)
-        self.assertIn("secret/app/db#nope: yok", out)
+        self.assertIn("secret/app/db#password: present (%d chars)" % len(SECRET), out)
+        self.assertIn("secret/app/db#nope: missing", out)
         self.assertNotIn(SECRET, out)
         rc, out, _ = self.run_main(["fields", "secret/app/db"])
         self.assertEqual(out.split(), ["password", "user"])
@@ -233,10 +233,10 @@ class WriteTests(unittest.TestCase):
     def tearDown(self):
         vault_cli.clipboard_read, vault_cli.clipboard_clear = self._r, self._c
 
-    def test_pano_merges_clears_clipboard_prints_no_value(self):
+    def test_clipboard_merges_clears_clipboard_prints_no_value(self):
         rc, out, err = self.run_main(["write", "secret/w/rec#token", "--clipboard"])
         self.assertEqual(rc, 0)
-        self.assertEqual(out.strip(), "yazildi: secret/w/rec#token (18 karakter, sha256 %s, surum 4)" % hashlib.sha256(b"tok-" b"ABCDEFGH-12345").hexdigest()[:8])
+        self.assertEqual(out.strip(), "written: secret/w/rec#token (18 chars, sha256 %s, version 4)" % hashlib.sha256(b"tok-" b"ABCDEFGH-12345").hexdigest()[:8])
         self.assertNotIn("ABCDEFGH", out + err)
         self.assertEqual(RECORDS["w/rec"], {"keep": "other-value-1", "token": "tok-" "ABCDEFGH-12345"})
         self.assertEqual(self.clip["v"], "")
@@ -248,7 +248,7 @@ class WriteTests(unittest.TestCase):
     def test_creates_new_path(self):
         rc, out, _ = self.run_main(["write", "secret/w/new#token", "--clipboard"])
         self.assertEqual((rc, VERSIONS["w/new"]), (0, 1))
-        self.assertIn("surum 1", out)
+        self.assertIn("version 1", out)
 
     def test_cas_conflict_leaves_data_and_clipboard(self):
         orig = vault_cli._read_v2
@@ -271,7 +271,7 @@ class WriteTests(unittest.TestCase):
             self.assertNotIn("abcdefgh", out + err)
         self.assertNotIn("token", RECORDS["w/rec"])
 
-    def test_hidden_not_allows_short_non_secret_value(self):
+    def test_not_secret_allows_short_non_secret_value(self):
         old = sys.stdin
         try:
             sys.stdin = io.StringIO("993\n")
@@ -290,30 +290,30 @@ class WriteTests(unittest.TestCase):
         finally:
             sys.stdin = old
 
-    def test_hidden_not_subcommand_run_stops_redacting_only_that_field(self):
+    def test_not_secret_subcommand_run_stops_redacting_only_that_field(self):
         RECORDS["w/rec"] = {"user": "9876543210", "password": "pw-Secret-4321"}
         META.pop("w/rec", None)
-        code = "import os;print(os.environ['KUL']);print(os.environ['PASSWORD'])"
-        argv = ["run", "--env", "KUL=secret/w/rec#kullanici", "--env", "PAROLA=secret/w/rec#parola", "--", sys.executable, "-c", code]
+        code = "import os;print(os.environ['USR']);print(os.environ['PASSWORD'])"
+        argv = ["run", "--env", "USR=secret/w/rec#user", "--env", "PASSWORD=secret/w/rec#password", "--", sys.executable, "-c", code]
         rc, out, _ = self.run_child(argv)
         self.assertEqual(out.decode().split(), ["***", "***"])          # both masked before the mark
-        rc, out, err = self.run_main(["not-secret", "secret/w/rec#kullanici"])
+        rc, out, err = self.run_main(["not-secret", "secret/w/rec#user"])
         self.assertEqual(rc, 0, err)
         self.assertEqual(META["w/rec"], {"not_secret": "user"})
         self.assertEqual(RECORDS["w/rec"]["user"], "9876543210")   # data untouched
         rc, out, _ = self.run_child(argv)
-        self.assertEqual(out.decode().split(), ["9876543210", "***"])   # only the marked field is shown, parola still masked
+        self.assertEqual(out.decode().split(), ["9876543210", "***"])   # only the marked field is shown, password still masked
         self.assertNotIn(b"pw-Secret-4321", out)
-        rc, _, err = self.run_main(["not-secret", "secret/w/rec#yok"])
+        rc, _, err = self.run_main(["not-secret", "secret/w/rec#nope"])
         self.assertEqual(rc, 3)
         self.assertIn("field not found", err)
-        self.run_main(["not-secret", "secret/w/rec#kullanici", "--undo"])
+        self.run_main(["not-secret", "secret/w/rec#user", "--undo"])
         self.assertEqual(META["w/rec"], {})
         rc, out, _ = self.run_child(argv)
         self.assertEqual(out.decode().split(), ["***", "***"])
 
-    def test_write_hidden_not_marks_the_field_and_keeps_other_metadata(self):
-        META["w/rec"] = {"description": "Test kaydi"}
+    def test_write_not_secret_marks_the_field_and_keeps_other_metadata(self):
+        META["w/rec"] = {"description": "Test record"}
         old = sys.stdin
         try:
             sys.stdin = io.StringIO("993\n")
@@ -321,19 +321,19 @@ class WriteTests(unittest.TestCase):
         finally:
             sys.stdin = old
         self.assertEqual(rc, 0, err)
-        self.assertEqual(META["w/rec"], {"description": "Test kaydi", "not_secret": "imap_port"})
+        self.assertEqual(META["w/rec"], {"description": "Test record", "not_secret": "imap_port"})
 
     def test_description_field_is_mirrored_to_metadata(self):
         META.pop("w/rec", None)
         old = sys.stdin
-        sys.stdin = io.StringIO("Yedek okuma tokeni\n")
+        sys.stdin = io.StringIO("Backup read token\n")
         try:
-            rc, _, _ = self.run_main(["write", "secret/w/rec#aciklama", "--stdin"])
+            rc, _, _ = self.run_main(["write", "secret/w/rec#description", "--stdin"])
         finally:
             sys.stdin = old
         self.assertEqual(rc, 0)
-        self.assertEqual(META["w/rec"], {"description": "Yedek okuma tokeni"})
-        self.run_main(["delete", "secret/w/rec#aciklama"])
+        self.assertEqual(META["w/rec"], {"description": "Backup read token"})
+        self.run_main(["delete", "secret/w/rec#description"])
         self.assertEqual(META["w/rec"], {})
         SEEN.clear()
         sys.stdin = io.StringIO("other-secret-123\n")
@@ -372,7 +372,7 @@ class WriteTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(RECORDS["w/rec"], {"keep": "other-value-1", "key": self.PEM})
         sha = hashlib.sha256(self.PEM.encode()).hexdigest()[:8]
-        self.assertEqual(out.strip(), f"yazildi: secret/w/rec#key ({len(self.PEM)} karakter, sha256 {sha}, surum 4)")
+        self.assertEqual(out.strip(), f"written: secret/w/rec#key ({len(self.PEM)} chars, sha256 {sha}, version 4)")
         self._assert_quiet(out, err)
 
     def test_stdin_multiline(self):
@@ -439,7 +439,7 @@ class BuildLockTests(unittest.TestCase):
             self.assertTrue(b.acquired)
 
 
-class BulTests(unittest.TestCase):
+class FindTests(unittest.TestCase):
     """vault_cli.py find: path / field name / description search, values never printed, cache 0600."""
 
     @classmethod
@@ -449,16 +449,16 @@ class BulTests(unittest.TestCase):
         cls.env = {k: os.environ.get(k) for k in ("VAULT_ADDR", "VAULT_TOKEN", "HOME", "USERPROFILE", "VAULT_FIND_EXCLUDING")}
         cls.home = tempfile.mkdtemp()
         os.environ.update(VAULT_ADDR="http://127.0.0.1:%d" % cls.srv.server_port, VAULT_TOKEN="t0k", HOME=cls.home, USERPROFILE=cls.home,
-                          VAULT_FIND_EXCLUDING="secret/arsiv/")
+                          VAULT_FIND_EXCLUDING="secret/archive/")
         RECORDS["panel/read-token"] = {"description": "Panel okuma PATi (salt okuma, izinli)", "token": "tok-VALUE-1234567"}
         RECORDS["panel/publish-token"] = {"description": "publish PATi", "token": "tok-" "OTHER-7654321"}
-        RECORDS["arsiv/yedek"] = {"password": "tok-ARSIV-1111111"}
+        RECORDS["archive/backup"] = {"password": "tok-ARCHIVE-1111111"}
         META["panel/read-token"] = {"description": "Panel okuma PATi (salt okuma, izinli)"}  # migrated record
 
     @classmethod
     def tearDownClass(cls):
         cls.srv.shutdown()
-        for k in ("panel/read-token", "panel/publish-token", "arsiv/yedek"):
+        for k in ("panel/read-token", "panel/publish-token", "archive/backup"):
             RECORDS.pop(k, None)
             META.pop(k, None)
         for k, v in cls.env.items():
@@ -478,7 +478,7 @@ class BulTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("secret/panel/read-token", out)
         self.assertNotIn("publish-token", out)  # "okuma" is not in that record
-        self.assertIn("fields: aciklama, token", out)
+        self.assertIn("fields: description, token", out)
         self.assertIn("Panel okuma", out)  # the description field is shown
         self.assertNotIn("VALUE", out)
         self.assertNotIn("OTHER", out)
@@ -486,7 +486,7 @@ class BulTests(unittest.TestCase):
     def test_turkish_case_folding_and_description_match(self):
         self.assertIn("read-token", self.find("İZİNLİ", "OKUMA")[1])
         self.assertIn("read-token", self.find("salt")[1])           # description only
-        self.assertIn("read-token", self.find("AÇIKLAMA", "okuma")[1])  # field name, diacritics folded
+        self.assertIn("read-token", self.find("DESCRİPTİON", "okuma")[1])  # field name, Turkish dotted capital I folded
 
     def test_no_match_is_rc1_with_hint(self):
         rc, out, _ = self.find("zzzqq")
@@ -520,15 +520,15 @@ class BulTests(unittest.TestCase):
         data_reads = [u for m, u in SEEN if "/v1/secret/data/" in u]
         self.assertEqual(data_reads, [])  # field names from subkeys, description from custom_metadata
         self.assertTrue(any("/v1/secret/subkeys/" in u for _, u in SEEN))
-        self.assertEqual([u for _, u in SEEN if "arsiv" in u], [])  # never listed, never read
-        self.assertNotIn("arsiv", out)
-        self.assertIn("fields: aciklama, token", out)
+        self.assertEqual([u for _, u in SEEN if "archive" in u], [])  # never listed, never read
+        self.assertNotIn("archive", out)
+        self.assertIn("fields: description, token", out)
 
     def test_offline_tier_query_gets_a_hint(self):
-        rc, out, err = self.find("arsiv")
+        rc, out, err = self.find("archive")
         self.assertEqual(rc, 1)
-        self.assertIn("secret/arsiv/ is never indexed", err)
-        self.assertNotIn("ARSIV-1111", out + err)
+        self.assertIn("secret/archive/ is never indexed", err)
+        self.assertNotIn("ARCHIVE-1111", out + err)
 
     def test_old_format_cache_is_replaced_not_used(self):
         import time
@@ -573,7 +573,7 @@ class BulTests(unittest.TestCase):
             SEEN.clear()
             rc, out, _ = self.find("publish")
             self.assertEqual(rc, 0)
-            self.assertIn("fields: aciklama, token", out)  # read on demand for the shown match only
+            self.assertIn("fields: description, token", out)  # read on demand for the shown match only
             self.assertEqual([u for _, u in SEEN if "/v1/secret/data/" in u], ["/v1/secret/data/panel/publish-token"])
             self.assertNotIn("OTHER", out)
             SEEN.clear()
@@ -595,7 +595,7 @@ class BulTests(unittest.TestCase):
         self.assertIn("tasinacak: secret/panel/publish-token", out)
         self.assertNotIn("read-token", out)  # already has a metadata description
         self.assertEqual([u for m, u in SEEN if m == "POST" or "/v1/secret/data/" in u], [])  # dry run reads/writes nothing
-        self.assertEqual([u for _, u in SEEN if "arsiv" in u], [])
+        self.assertEqual([u for _, u in SEEN if "archive" in u], [])
         rc, out, _ = run("--apply")
         self.assertIn("tasindi: secret/panel/publish-token", out)
         self.assertEqual(META["panel/publish-token"], {"description": "publish PATi"})

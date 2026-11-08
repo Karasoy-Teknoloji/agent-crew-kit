@@ -55,7 +55,7 @@ class Hidden(unittest.TestCase):
         self.assertEqual(sorted(set(bad)), [])
 
     def test_no_script_launches_with_a_raw_start_process_window_style_hidden(self):
-        """Start-Process ... -WindowStyle Hidden still opens a console window for console exes; Start-GizliSurec (tools/hidden.ps1) is the one path."""
+        """Start-Process ... -WindowStyle Hidden still opens a console window for console exes; Start-HiddenProcess (tools/hidden.ps1) is the one path."""
         import re
         root = Path(__file__).resolve().parents[2]
         rx = re.compile(r"Start-Process.*-WindowStyle\s+Hidden", re.I)
