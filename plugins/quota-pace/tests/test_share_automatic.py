@@ -45,9 +45,9 @@ class Throttle(unittest.TestCase):
 
     def test_due_only_after_the_interval(self):
         self.assertTrue(P.auto_required({}, 1000, 2))                                   # never checked
-        self.assertFalse(P.auto_required({"son_kontrol": 1000}, 1000 + 2 * 3600 - 1, 2))
-        self.assertTrue(P.auto_required({"son_kontrol": 1000}, 1000 + 2 * 3600, 2))
-        self.assertFalse(P.auto_required({"son_kontrol": 1000}, 1000 + 23 * 3600, 24))
+        self.assertFalse(P.auto_required({"last_check": 1000}, 1000 + 2 * 3600 - 1, 2))
+        self.assertTrue(P.auto_required({"last_check": 1000}, 1000 + 2 * 3600, 2))
+        self.assertFalse(P.auto_required({"last_check": 1000}, 1000 + 23 * 3600, 24))
 
     def test_interval_default_and_config(self):
         self.assertEqual(P.auto_interval_hour(), 2.0)
@@ -57,9 +57,9 @@ class Throttle(unittest.TestCase):
             self.assertEqual(P.auto_interval_hour(), want, v)
 
     def test_state_file_moves_the_marker_to_the_next_due_time(self):
-        P.oto_yaz({"pushed_quota": 40}, 5000.0, 2)
-        self.assertEqual(P.read_auto_status(), {"pushed_quota": 40, "son_kontrol": 5000.0})
-        self.assertEqual(int(os.stat(P.oto_yol("share-following")).st_mtime), 5000 + 7200)   # what statusline.sh stats
+        P.write_auto_status({"pushed_quota": 40}, 5000.0, 2)
+        self.assertEqual(P.read_auto_status(), {"pushed_quota": 40, "last_check": 5000.0})
+        self.assertEqual(int(os.stat(P.auto_path("share-following")).st_mtime), 5000 + 7200)   # what statusline.sh stats
 
 
 class Lock(unittest.TestCase):
@@ -75,27 +75,27 @@ class Lock(unittest.TestCase):
         P.auto_lock_release()
         self.assertTrue(P.get_auto_lock(now + 32 * 60))
         P.auto_lock_release()
-        self.assertFalse(os.path.exists(P.oto_yol("share.lock")))
+        self.assertFalse(os.path.exists(P.auto_path("share.lock")))
 
     def test_a_run_that_finds_the_lock_taken_does_nothing_and_keeps_it(self):
         self.assertTrue(P.get_auto_lock(time.time()))
         with mock.patch.object(P, "person_name", side_effect=AssertionError("must not run")):
             P.share(automatic=True)
-        self.assertTrue(os.path.exists(P.oto_yol("share.lock")))                    # not released by the loser
+        self.assertTrue(os.path.exists(P.auto_path("share.lock")))                    # not released by the loser
         P.auto_lock_release()
 
 
 class Decision(unittest.TestCase):
     def test_only_the_integer_weekly_percent_decides(self):
         self.assertEqual(P.auto_decision(None, {}), "skip")
-        self.assertEqual(P.auto_decision(40, {}), "it")
-        self.assertEqual(P.auto_decision(40, {"pushed_quota": 40}), "degisiklik yok")
-        self.assertEqual(P.auto_decision(41, {"pushed_quota": 40}), "it")
+        self.assertEqual(P.auto_decision(40, {}), "push")
+        self.assertEqual(P.auto_decision(40, {"pushed_quota": 40}), "no change")
+        self.assertEqual(P.auto_decision(41, {"pushed_quota": 40}), "push")
 
 
 @unittest.skipUnless(shutil.which("git"), "git not installed")
 class Flow(unittest.TestCase):
-    """one_attempt(otomatik=True) and the whole _oto flow against a local bare remote."""
+    """one_attempt(automatic=True) and the whole _auto flow against a local bare remote."""
 
     def setUp(self):
         clean()
@@ -123,7 +123,7 @@ class Flow(unittest.TestCase):
             self.addCleanup(p.stop)
 
     def sh(self, *a):
-        r = subprocess.run(a, capture_output=True, text=True, env=self.env)
+        r = subprocess.run(a, capture_output=True, text=True, encoding="utf-8", env=self.env)
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout.strip()
 
@@ -138,26 +138,26 @@ class Flow(unittest.TestCase):
         return P.one_attempt(self.clone, self.remote, r, r["date"], automatic=True)
 
     def test_same_percent_writes_and_commits_nothing_even_when_other_figures_moved(self):
-        self.assertEqual(self.attempt(record(day(), quota=40, d7=100, commit=1)), "itildi")
+        self.assertEqual(self.attempt(record(day(), quota=40, d7=100, commit=1)), "pushed")
         head = self.head()
         r = record(day(), quota=40, d7=999, commit=9, week_usd=777)                    # $ and commits moved, % did not
-        r["mod"], r["forecast"] = "TIGHT", 120
-        self.assertEqual(self.attempt(r), "degisiklik yok")
+        r["mode"], r["forecast"] = "TIGHT", 120
+        self.assertEqual(self.attempt(r), "no change")
         self.assertEqual(self.head(), head)
 
     def test_changed_percent_replaces_todays_row_in_place_and_pushes(self):
         self.attempt(record(day(1), quota=30, d7=100))
         self.attempt(record(day(), quota=40, d7=100))
-        self.assertEqual(self.attempt(record(day(), quota=47, d7=150, commit=2)), "itildi")
+        self.assertEqual(self.attempt(record(day(), quota=47, d7=150, commit=2)), "pushed")
         rows = P.file_lines(self.person_file())
         self.assertEqual([(x["date"], x["quota"], x["d7"]) for x in rows], [(day(1), 30, 100), (day(), 47, 150)])   # one row per date
-        self.assertEqual(len(P.line_parse(P.install_line(record(day(), quota=47)))["date"]), 10)
+        self.assertEqual(len(P.line_parse(P.build_line(record(day(), quota=47)))["date"]), 10)
         self.assertEqual(sum(l.startswith("| %s |" % day()) for l in self.person_file().splitlines()), 1)   # rows that BEGIN with today (the fixture's week-reset cell may equal today)
 
     def test_daily_job_still_never_replaces_a_row_of_the_same_day(self):
         self.attempt(record(day(), quota=40))
         m = self.person_file()
-        self.assertEqual(P.add_to_file(m, "Ali", P.install_line(record(day(), quota=55)), day()), m)
+        self.assertEqual(P.add_to_file(m, "Ali", P.build_line(record(day(), quota=55)), day()), m)
 
     def test_whole_flow_throttle_unchanged_changed_and_retry(self):
         t0 = 1_800_000_000.0
@@ -177,7 +177,7 @@ class Flow(unittest.TestCase):
             self.assertEqual(len(calls), 1)
             P.share(automatic=True, now=t0 + 3 * 3600)                              # due, % unchanged: no work, no commit
             self.assertEqual((len(calls), self.head()), (1, head))
-            self.assertEqual(P.read_auto_status()["son_kontrol"], t0 + 3 * 3600)         # only the check time moved
+            self.assertEqual(P.read_auto_status()["last_check"], t0 + 3 * 3600)         # only the check time moved
             self.assertEqual(P.read_auto_status()["last_sharing"], t0)
             status["quota"] = 41
             real = P.one_attempt
@@ -193,7 +193,7 @@ class Flow(unittest.TestCase):
             self.assertEqual(n["i"], 3)
             self.assertNotEqual(self.head(), head)
             self.assertEqual(P.read_auto_status()["pushed_quota"], 41)
-        self.assertFalse(os.path.exists(P.oto_yol("share.lock")))
+        self.assertFalse(os.path.exists(P.auto_path("share.lock")))
 
     def test_failed_push_keeps_the_old_baseline_and_waits_for_the_next_interval(self):
         t0 = 1_800_000_000.0
@@ -203,13 +203,13 @@ class Flow(unittest.TestCase):
             P.share(automatic=True, now=t0)
         d = P.read_auto_status()
         self.assertNotIn("pushed_quota", d)
-        self.assertEqual(d["son_kontrol"], t0)
+        self.assertEqual(d["last_check"], t0)
 
 
 STUB = """#!/usr/bin/env python3
 import sys
 if "--automatic" in sys.argv:
-    open(sys.argv[0] + ".cagri", "a").write("x\\n")
+    open(sys.argv[0] + ".call", "a").write("x\\n")
 """
 
 
@@ -218,7 +218,7 @@ class ShellGate(unittest.TestCase):
     """statusline.sh starts the share detached only when due; renders inside the interval start nothing."""
 
     def setUp(self):
-        self.home = tempfile.mkdtemp(prefix="oto-sh-")
+        self.home = tempfile.mkdtemp(prefix="auto-sh-")
         self.claude = os.path.join(self.home, ".claude")
         os.makedirs(os.path.join(self.claude, "cost"))
         os.makedirs(os.path.join(self.home, ".config", "claude-shared"))
@@ -242,7 +242,7 @@ class ShellGate(unittest.TestCase):
         t0 = time.time()
         r = subprocess.run(["bash", os.path.join(self.plug, "statusline.sh")], input=data, text=True, capture_output=True, timeout=60,
                            env=dict(os.environ, HOME=self.home, QUOTA_SHARE_AUTO="1"))
-        self.assertIn("hafta %50", r.stdout)
+        self.assertIn("50", r.stdout)                                                 # the weekly figure: the status line rendered
         time.sleep(0.6)                                                               # the detached stub is quick
         return time.time() - t0
 
@@ -276,7 +276,7 @@ class ShellGate(unittest.TestCase):
         self.render()
         self.assertEqual(self.call_count(), 0)
         open(os.path.join(self.home, ".config", "claude-shared", "plan"), "w").write("100\n")
-        open(os.path.join(self.claude, "cost", "closed"), "w").close()
+        open(os.path.join(self.claude, "cost", "off"), "w").close()
         self.render()
         self.assertEqual(self.call_count(), 0)
 
