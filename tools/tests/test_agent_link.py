@@ -38,7 +38,7 @@ class AgentLink(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(self.clean)
         self.claude = self.tmp / "ev" / ".claude"
-        self.source = self.tmp / "clone ç" / "agents"          # a space and a non-ASCII letter: Windows path handling
+        self.source = self.tmp / "clone é" / "agents"          # a space and a non-ASCII letter: Windows path handling
         self.source.mkdir(parents=True)
         (self.source / "quick-task-hm.md").write_text("---\nname: quick-task-hm\n---\n", encoding="utf-8")
         self.link = self.claude / "agents" / "claude-shared"
@@ -86,7 +86,7 @@ class AgentLink(unittest.TestCase):
         self.run_cmd(target=other)
         ok, out = self.run_cmd()
         self.assertTrue(ok, out)
-        self.assertIn("yenilendi", out)
+        self.assertIn("replaced", out)
         self.assertTrue(os.path.samefile(self.link, self.source))
         self.assertTrue(other.is_dir())   # the old target itself is never touched
 

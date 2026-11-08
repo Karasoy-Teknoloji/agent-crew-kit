@@ -40,9 +40,9 @@ class DailyTest(unittest.TestCase):
     def test_writes_one_line_with_time_level_and_message(self):
         path = os.path.join(self.tmp, "sub", "a.log")
         lg, _ = self.lg(path=path)
-        lg.info("hello %s", "wörld")
+        lg.info("hello %s", "wérld")
         with open(path, encoding="utf-8") as f:
-            self.assertRegex(f.read(), r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d INFO hello wörld\n$")
+            self.assertRegex(f.read(), r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d INFO hello wérld\n$")
 
     def test_default_path_and_env_override_follow_the_name(self):
         self.assertTrue(G.log_path("lost-work").endswith(os.path.join(".local", "state", "lost-work.log")))
