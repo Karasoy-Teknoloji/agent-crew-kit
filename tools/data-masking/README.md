@@ -13,21 +13,21 @@ Nothing is installed or enabled by default. Use the hook, the filter, or neither
 
 ## What it masks
 
-Matches are replaced by a stable token: `[TCKN:ab12cd]`, `[TEL:..]`, `[EPOSTA:..]`, `[IBAN:..]`, `[KART:..]`. The eight hex
+Matches are replaced by a stable token: `[TR_ID:ab12cd]`, `[PHONE:..]`, `[EMAIL:..]`, `[IBAN:..]`, `[CARD:..]`. The eight hex
 characters (six in versions before this one; old six-hex tokens in stored text are still recognised as already masked) come from an HMAC-SHA256 over the normalised value with a local key, so the same value always gives the same
 token (rows can still be correlated) and the value cannot be recovered from the token without the key.
 
 | Token | Detects | Notes |
 |---|---|---|
-| `TCKN` | 11-digit national ID | checksum must hold; a number is skipped only when the FULL key (camelCase boundaries and `.`/`-` read as `_`, case-insensitive) is exactly one of an explicit CI allowlist: `run_id`, `job_id`, `check_run_id`, `check_suite_id`, `workflow_id`, `workflow_run_id`, `artifact_id`, `release_id`, `asset_id`, `comment_id`, `deployment_id`, `review_id`, `status_id`, `milestone_id`, `label_id`, `event_id`, `build_id`, `pipeline_id`, `issue_id`, `pull_request_id`, `installation_id`, `repository_id`, `step_id`, `task_id`, `github_run_id`, `ci_*_id` (so `runId`, `RUN_ID`, `github.run_id` work), or the number follows `/runs/`, `/jobs/`, `/comments/` ... in a URL path. Everything else is masked: a bare `id`, `caller_id`, `caller-id`, `callerId`, `x-customer-id`, `abone_no_id`, `identity-id`, `foo_id`, `paid`, `Said`. No list of person words is involved |
-| `TEL` | Turkish mobile and landline numbers | `0532 123 45 67`, `+90 (532) ...`, `0090 ...`, `5321234567`, `(212) 123 45 67`; all formats of one number give one token; IPs, timestamps, versions, hashes are left alone |
-| `MAIL` | e-mail addresses | lower-cased before hashing; file-name-like suffixes (`image@2x.png`, `x@1000.service`) and allowed domains are left alone |
+| `TR_ID` | 11-digit national ID | checksum must hold; a number is skipped only when the FULL key (camelCase boundaries and `.`/`-` read as `_`, case-insensitive) is exactly one of an explicit CI allowlist: `run_id`, `job_id`, `check_run_id`, `check_suite_id`, `workflow_id`, `workflow_run_id`, `artifact_id`, `release_id`, `asset_id`, `comment_id`, `deployment_id`, `review_id`, `status_id`, `milestone_id`, `label_id`, `event_id`, `build_id`, `pipeline_id`, `issue_id`, `pull_request_id`, `installation_id`, `repository_id`, `step_id`, `task_id`, `github_run_id`, `ci_*_id` (so `runId`, `RUN_ID`, `github.run_id` work), or the number follows `/runs/`, `/jobs/`, `/comments/` ... in a URL path. Everything else is masked: a bare `id`, `caller_id`, `caller-id`, `callerId`, `x-customer-id`, `abone_no_id`, `identity-id`, `foo_id`, `paid`, `Said`. No list of person words is involved |
+| `PHONE` | Turkish mobile and landline numbers | `0532 123 45 67`, `+90 (532) ...`, `0090 ...`, `5321234567`, `(212) 123 45 67`; all formats of one number give one token; IPs, timestamps, versions, hashes are left alone |
+| `EMAIL` | e-mail addresses | lower-cased before hashing; file-name-like suffixes (`image@2x.png`, `x@1000.service`) and allowed domains are left alone |
 | `IBAN` | Turkish IBANs | mod-97 check |
 | `CARD` | payment cards, 13-19 digits | Luhn check and a plausible leading digit |
 
 Digit boundaries: a number is never part of a longer digit run and never the fraction of a decimal (`1.<digits>` stays), but
-letters, `_`, `.` and `,` around it do not protect it: `No.<TCKN>`, `T.C.<TCKN>`, `TC<TCKN>`, `<TCKN>.0`, `identity_<TCKN>.pdf`,
-`<TCKN>_scan.pdf`, CSV `1,<TCKN>,x`, `Tel.0532...` are masked (also in Grep file lists). A TCKN in 3-3-3-2 groups (blank, dot,
+letters, `_`, `.` and `,` around it do not protect it: `No.<TR_ID>`, `T.C.<TR_ID>`, `TC<TR_ID>`, `<TR_ID>.0`, `identity_<TR_ID>.pdf`,
+`<TR_ID>_scan.pdf`, CSV `1,<TR_ID>,x`, `Tel.0532...` are masked (also in Grep file lists). A TR_ID in 3-3-3-2 groups (blank, dot,
 dash; a dotted group that is a valid IPv4 address stays) is masked. Phone numbers with a `0` / `90` / `+90` prefix, IBANs and cards
 also match when the groups are split by two blanks, NBSP, U+2011 or U+2013 (any dash). Every Unicode format/control/combining
 character (Cf, Cc, Mn, Me; not newline or tab) between two digits is removed before matching (LRM, ZWSP, NUL, backspace, CR ...).
@@ -36,13 +36,13 @@ A bare `5XXXXXXXXX` (ten digits, no prefix, no separator) is a phone number only
 `callerPhone`, and the dict key of a JSON leaf): without one it is a file size, `MemTotal`, `rx_bytes` or a row number far more often.
 GitHub ids: `database_id` / `databaseId` and `/job/<id>` are in the allowlist; for a command that is exactly ONE `gh run list|view|watch`
 or `gh api .../actions/runs|jobs` call (no `;`, `&&`, `|`, `$(`, backticks, newline; not `--log`) an 11-digit number in an id
-position (the ID column of `gh run list`, `· <id>` / `(ID <id>)`, an `id` key in the JSON) stays readable; any other valid TCKN in
-that output is masked. JSON numbers that are TCKN / phone / card shaped (`{"tckn": 12345678901}`) are masked (the number becomes the token string).
+position (the ID column of `gh run list`, `· <id>` / `(ID <id>)`, an `id` key in the JSON) stays readable; any other valid TR_ID in
+that output is masked. JSON numbers that are TR_ID / phone / card shaped (`{"tckn": 12345678901}`) are masked (the number becomes the token string).
 Percent, HTML-entity and `\uXXXX` forms (`email=ayse%40...`, `%2B90...`, `&#64;`, `&commat;`, `\u0040`, double encoding such as
 `%2540`) are decoded in a copy of the line; when the copy holds an identifier, the decoded line is emitted, masked; other lines stay
 byte for byte. Decoding never adds a line break or control character, and never unmasks a value the original line had.
 
-Phone numbers also match with NBSP, thin spaces, tabs or dots (`0532.123.45.67`, dots only after a `0` / `90` / `+90` prefix) as separators. E-mail addresses may contain Unicode letters (`cagri@firma.com` written in Turkish, IDN domains); the TLDs `py rs md so sh zip` are real TLDs and no longer treated as file suffixes (`x@y.png`, `x@1000.service` still are). Non-ASCII decimal digits (fullwidth, Arabic-Indic ...) are read as ASCII digits (`TCKN`, `TEL`, `CARD`, `IBAN`); the text always comes back in that normalised form, so unrelated Arabic / Persian numerals are shown as ASCII digits.
+Phone numbers also match with NBSP, thin spaces, tabs or dots (`0532.123.45.67`, dots only after a `0` / `90` / `+90` prefix) as separators. E-mail addresses may contain Unicode letters (`cagri@firma.com` written in Turkish, IDN domains); the TLDs `py rs md so sh zip` are real TLDs and no longer treated as file suffixes (`x@y.png`, `x@1000.service` still are). Non-ASCII decimal digits (fullwidth, Arabic-Indic ...) are read as ASCII digits (`TR_ID`, `PHONE`, `CARD`, `IBAN`); the text always comes back in that normalised form, so unrelated Arabic / Persian numerals are shown as ASCII digits.
 
 The HMAC key itself is masked: its 64-hex literal (any case) becomes `[KEY:masked]` (`cat ~/.claude/.mask-key` through the hook or the filter shows no key; the key file is only read, never created, for this). The key split into hex groups is masked too: pairs or quads separated by up to three blanks, tabs, newlines, `,`, `:` or `-`, with an optional `0x` / `\x` per byte (`xxd`, `hexdump -C`, C arrays `{0x30, 0x31, ...}`, Python bytes `b'\x30...'`): any run holding 16 key characters, or 8 key bytes in hex. Not covered: base64, octal, decimal byte lists, line-wrapped text or any other re-encoding. **Required:** a deny rule for reading the key file (`Read(~/.claude/.mask-key)` and Bash `cat` / `xxd` / `base64` of it) in `settings.json` - that deny is the real control; masking its printouts is only a second line.
 
@@ -51,7 +51,7 @@ Idempotent: masking masked text changes nothing.
 
 ## Credentials
 
-Credentials are masked like personal data, with the token `[SIR:xxxxxx]` (HMAC, same key; same value = same token).
+Credentials are masked like personal data, with the token `[SECRET:xxxxxx]` (HMAC, same key; same value = same token).
 
 - Key/value pairs whose key is (case-insensitive) `password`, `passwd`, `pwd`, `pass` (exactly), `secret`, `client_secret`, `token`,
   `access_token`, `refresh_token`, `api_key`, `apikey`, `api-key`, `authorization` (the value after `Bearer`/`Basic`), `private_key`,
@@ -94,7 +94,7 @@ Credentials are masked like personal data, with the token `[SIR:xxxxxx]` (HMAC, 
   and a tail after the first blank: `SmtpPassword=Ab9 xY 12` / `password: a b c` at the start of a line (no blank before `=` / `:`, a strong key such as
   password/secret/sifre/parola/key) masks the whole rest of the line. `Pass: 1234 Failed: 0`, `password = expr` and values that stop at `;` or a quote keep the short rule.
 - Not touched: prose ("the password is..."), keys without values, values shorter than 4 characters, and values that are
-  **entirely** a placeholder: `null`/`true`/`false`/`none`/`nil`/`undefined`/`required`/`optional`/`string`/`empty`/`redacted`/`hidden`/`masked`, runs of `*` / `x` / `.` / `#` / `-` / `_`, an already masked token (`[SIR:xxxxxx]`, `[TEL:xxxxxx]`),
+  **entirely** a placeholder: `null`/`true`/`false`/`none`/`nil`/`undefined`/`required`/`optional`/`string`/`empty`/`redacted`/`hidden`/`masked`, runs of `*` / `x` / `.` / `#` / `-` / `_`, an already masked token (`[SECRET:xxxxxx]`, `[PHONE:xxxxxx]`),
   `${PRESENT}` / `${secrets.pw}`, `$DB_PASS` and `$(DB_PASS)` (upper-case names; each `_`-separated segment is letters, the first one may end in at most two digits: `$S3_KEY`, `$OAUTH2_SECRET`),
   `<your-password>` / `<YOUR_PASSWORD>` / `<db password>` (all-lower or all-upper words, digits only after a separator), `%DB_PASS%` / `%appdata%`, `{{ secrets.pw }}`.
   Placeholders are recognised by structure, not by looking like a name: `$ADMIN2026`, `$PASS12345`, `<Secret123>`, `<password1>`, `%Pass9%`, `%Pass%` are masked.
@@ -168,7 +168,7 @@ Everything is created at first use with mode `0600`; the repo ships no key and n
 | What | Default | Override |
 |---|---|---|
 | HMAC key (32 random bytes, hex; never printed) | `~/.claude/.mask-key` | `TRIM_KEY_FILE` |
-| Count log (counts per run, never values) | `~/.claude/mask-counter.log` | `TRIM_COUNT_LOG` |
+| Count log (counts per run, never values) | `~/.claude/mask-count.log` | `TRIM_COUNT_LOG` |
 | Allowlist | `~/.claude/mask-allowed.txt` | `TRIM_ALLOWLIST` |
 | Stored full output of truncated results (7 days) | `~/.claude/tool-output/` | - |
 
@@ -236,7 +236,7 @@ So masking is built to finish early and to fail closed:
   only its base64 `data` unmasked.
 - When the budget ends (or a piece raises), the unprocessed part is replaced by ONE line, for example
   `[mask: time budget exceeded, 1200 lines withheld]` or `[mask: masking error, 3 lines withheld]`, and the count log gets
-  `ATLANDI`. The withheld text is never shown. An unexpected error inside the hook replaces every string of that tool's
+  `SKIPPED`. The withheld text is never shown. An unexpected error inside the hook replaces every string of that tool's
   response (dict keys are masked too) by `[mask: internal error, output withheld]`; if even that cannot be written, a fixed ASCII
   payload is emitted, so the hook never ends silently for a tool it handles. The hook output is pure ASCII JSON (`\uXXXX` escapes), a lone surrogate in
   a tool response cannot break it. Dict keys of MCP/other responses are masked like values (a key can carry data). Every string key goes through the same masking (no pre-filter); a key the masking leaves alone stays as it is. When the budget is spent, a key becomes `[mask: key N]` except the fixed envelope names (`type`, `text`, `content`, `stdout`, `stderr`, `isError`, `structuredContent`, `file`, `filePath`).
@@ -262,8 +262,8 @@ So masking is built to finish early and to fail closed:
   YAML block scalars (`password: |`, `>-`) beyond their first line, TOML multi-line strings (three single or double quotes),
   XML CDATA sections, HCL heredocs, JSON keys split or put in arrays, double-escaped JSON, a key split by zero-width / soft hyphen /
   homoglyph characters or written with fullwidth `=` / `:`, a value on the line after `password=`, `.pgpass` / `htpasswd` /
-  `/etc/shadow` lines, docker `config.json` base64 `auth`, a TCKN split at an arbitrary position (not 3-3-3-2) or across lines,
-  a TCKN glued to other digits (also through decoding: `%30<TCKN>`), base64-encoded identifiers, e-mail with `(at)` / fullwidth `@` /
+  `/etc/shadow` lines, docker `config.json` base64 `auth`, a TR_ID split at an arbitrary position (not 3-3-3-2) or across lines,
+  a TR_ID glued to other digits (also through decoding: `%30<TR_ID>`), base64-encoded identifiers, e-mail with `(at)` / fullwidth `@` /
   quoted local part / IP-literal domain / a file-like TLD (`.json`, `.service`), phone numbers with mixed dot separators or without
   a prefix in dotted / slash form, cards split by dots, a psql / mysql table whose rows continue in the next 128000-character piece,
   a bare `5XXXXXXXXX` in a table column without a phone-like key, the HMAC key in any encoding other than the hex groups above.

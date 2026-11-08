@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for trim.py (masking hook / filter). SYNTHETIC DATA ONLY (generated TCKN/IBAN/card numbers, made-up phone numbers
+"""Tests for trim.py (masking hook / filter). SYNTHETIC DATA ONLY (generated TR_ID/IBAN/card numbers, made-up phone numbers
 and e-mail addresses).
 
 Run:  python3 tools/data-masking/test_trim.py -v     (or: python3 -m unittest discover -s tools/data-masking)
@@ -7,6 +7,7 @@ The module-level tests use a temporary key file, count log and allowlist (TRIM_K
 the hook tests run trim.py as a real process with HOME pointed at a temporary directory. Nothing under the real ~/.claude
 is read or written.
 """
+# Turkish locale data: Turkish test input (sifre, parola, kimlik, Gizli, names, e-mail with Turkish letters) is what the masker must handle; it is not untranslated prose.
 import collections
 import json
 import os
@@ -39,7 +40,7 @@ import trim  # noqa: E402
 TRIM = os.path.join(BIN, "trim.py")
 
 
-def tckn_generate(seed):
+def tr_id_generate(seed):
     r = random.Random(seed)
     d = [r.randint(1, 9)] + [r.randint(0, 9) for _ in range(8)]
     d.append(((d[0] + d[2] + d[4] + d[6] + d[8]) * 7 - (d[1] + d[3] + d[5] + d[7])) % 10)
@@ -47,8 +48,8 @@ def tckn_generate(seed):
     return "".join(map(str, d))
 
 
-def tckn_invalid(seed):
-    t = tckn_generate(seed)
+def tr_id_invalid(seed):
+    t = tr_id_generate(seed)
     return t[:10] + str((int(t[10]) + 1) % 10)
 
 
@@ -77,22 +78,22 @@ class Masking(unittest.TestCase):
     def m(self, s):
         return trim.mask_out(s)
 
-    # ---- TCKN
-    def test_tckn_valid_is_masked(self):
+    # ---- TR_ID
+    def test_tr_id_valid_is_masked(self):
         for i in range(30):
-            t = tckn_generate(i)
+            t = tr_id_generate(i)
             y, s = self.m(f"tckn={t};")
             self.assertNotIn(t, y)
-            self.assertTrue(re.search(r"tckn=\[TCKN:[0-9a-f]{8}\];", y), y)
-            self.assertEqual(s["TCKN"], 1)
+            self.assertTrue(re.search(r"tckn=\[TR_ID:[0-9a-f]{8}\];", y), y)
+            self.assertEqual(s["TR_ID"], 1)
 
-    def test_tckn_invalid_unchanged(self):
+    def test_tr_id_invalid_unchanged(self):
         for i in range(30):
-            t = tckn_invalid(i)
+            t = tr_id_invalid(i)
             self.assertEqual(self.m(f"x {t} y")[0], f"x {t} y")
 
-    def test_tckn_boundaries(self):
-        t = tckn_generate(5)
+    def test_tr_id_boundaries(self):
+        t = tr_id_generate(5)
         for text in (f"0{t}", t[:9], t + "1", f"1.{t}"):
             self.assertEqual(self.m(text)[0], text, text)
         for text in (f"a{t}", f"{t}b", f"{t}.5", f"id_{t}x"):  # round 3: only digits (and a decimal point before) protect it
@@ -100,12 +101,12 @@ class Masking(unittest.TestCase):
         self.assertNotIn(t, self.m(f'{{"tckn":"{t}"}}')[0])
         self.assertNotIn(t, self.m(f"/customer/{t}/details")[0])
 
-    def test_tckn_id_field_values_are_skipped(self):
-        t = tckn_generate(7)  # CI/GitHub ids can have 11 digits and may pass the checksum by chance
+    def test_tr_id_id_field_values_are_skipped(self):
+        t = tr_id_generate(7)  # CI/GitHub ids can have 11 digits and may pass the checksum by chance
         for text in (f"run_id={t}", f"/actions/runs/{t}/jobs", f"/comments/{t}"):
             self.assertEqual(self.m(text)[0], text, text)
         self.assertNotIn(t, self.m(f'"id": {t}')[0])  # a bare id is not a CI id key: masked
-        # but TcId (the product-a Users.TcId column holds a TCKN) is masked
+        # but TcId (the product-a Users.TcId column holds a TR_ID) is masked
         self.assertNotIn(t, self.m(f'"TcId": {t}')[0])
         self.assertNotIn(t, self.m(f"tc_id={t}")[0])
 
@@ -118,15 +119,15 @@ class Masking(unittest.TestCase):
         tokens = set()
         for b in formats:
             y, s = self.m(f"caller: {b}, done")
-            self.assertEqual(s["TEL"], 1, b)
-            tokens.add(re.search(r"\[TEL:[0-9a-f]{8}\]", y).group(0))
-            self.assertNotRegex(re.sub(r"\[TEL:[0-9a-f]{8}\]", "", y), r"\d{3}")  # random hex in a token may contain digits
+            self.assertEqual(s["PHONE"], 1, b)
+            tokens.add(re.search(r"\[PHONE:[0-9a-f]{8}\]", y).group(0))
+            self.assertNotRegex(re.sub(r"\[PHONE:[0-9a-f]{8}\]", "", y), r"\d{3}")  # random hex in a token may contain digits
         self.assertEqual(len(tokens), 1, tokens)
 
     def test_landline(self):
         for b in ("0212 123 45 67", "02121234567", "+90 212 123 45 67", "(212) 123 45 67", "0 262 123 45 67"):
             y, s = self.m(f"x {b} y")
-            self.assertEqual(s["TEL"], 1, b)
+            self.assertEqual(s["PHONE"], 1, b)
         self.assertEqual(self.m("0212 123 45 67")[0], self.m("+90 212 123 45 67")[0])
 
     def test_different_number_different_token(self):
@@ -151,11 +152,11 @@ class Masking(unittest.TestCase):
     # ---- e-mail
     def test_email(self):
         y, s = self.m("Ali.Veli+x@gmail.com and <ali.veli+x@GMAIL.com>.")
-        self.assertEqual(s["EPOSTA"], 2)
-        tokens = re.findall(r"\[EPOSTA:[0-9a-f]{8}\]", y)
+        self.assertEqual(s["EMAIL"], 2)
+        tokens = re.findall(r"\[EMAIL:[0-9a-f]{8}\]", y)
         self.assertEqual(len(set(tokens)), 1)  # upper/lower case is the same value
         self.assertNotIn("gmail", y)
-        self.assertIn("and <[EPOSTA:", y)
+        self.assertIn("and <[EMAIL:", y)
 
     def test_email_allowlist_and_false_positives(self):
         for g in ("git@github.com:org/repo.git", "noreply@anthropic.com", "123+x@users.noreply.github.com",
@@ -164,7 +165,7 @@ class Masking(unittest.TestCase):
                   "foo@sha256:abcdef", "a @ b.com", "mail@", "@domain.com"):
             self.assertEqual(self.m(g)[0], g, g)
         y, s = self.m("customer@company.com.tr")
-        self.assertEqual(s["EPOSTA"], 1)
+        self.assertEqual(s["EMAIL"], 1)
 
     # ---- IBAN / card
     def test_iban(self):
@@ -187,8 +188,8 @@ class Masking(unittest.TestCase):
                 formats += [f"{k[:4]} {k[4:10]} {k[10:]}"]
             for b in formats:
                 y, s = self.m(f"kart {b} son")
-                self.assertEqual(s["KART"], 1, b)
-                self.assertNotIn(k[-4:], re.sub(r"\[KART:[0-9a-f]{8}\]", "", y))
+                self.assertEqual(s["CARD"], 1, b)
+                self.assertNotIn(k[-4:], re.sub(r"\[CARD:[0-9a-f]{8}\]", "", y))
 
     def test_card_no_false_positives(self):
         k = luhn_generate("4", 16, 1)
@@ -198,13 +199,13 @@ class Masking(unittest.TestCase):
                   "2026 1028 1230 4500", "1793138343216000000", "0." + luhn_generate("4", 16, 9),
                   "x" + luhn_generate("4", 16, 9) + "0"):
             y, s = self.m(g)
-            self.assertEqual(s["KART"], 0, g)
+            self.assertEqual(s["CARD"], 0, g)
         for g in (luhn_generate("4", 16, 9) + "a", "a" + luhn_generate("4", 16, 9)):  # round 3: letters do not protect a card number
-            self.assertEqual(self.m(g)[1]["KART"], 1, g)
+            self.assertEqual(self.m(g)[1]["CARD"], 1, g)
 
     # ---- general properties
     def test_idempotent(self):
-        t, ib, k = tckn_generate(9), iban_generate(9), luhn_generate("4", 16, 9)
+        t, ib, k = tr_id_generate(9), iban_generate(9), luhn_generate("4", 16, 9)
         text = f"{t} 05321234567 ali@gmail.com {ib} {k} +90 212 123 45 67\n" * 3
         a, _ = self.m(text)
         b, s2 = self.m(a)
@@ -220,14 +221,14 @@ class Masking(unittest.TestCase):
         self.assertEqual(self.m(None)[0], None)
 
     def test_line_structure_preserved(self):
-        t = tckn_generate(11)
+        t = tr_id_generate(11)
         text = f"a\n{t}\n\n05321234567 x\r\nson"
         y, _ = self.m(text)
         self.assertEqual(text.count("\n"), y.count("\n"))
         self.assertEqual(len(text.splitlines()), len(y.splitlines()))
 
     def test_token_stable_across_processes(self):
-        t = tckn_generate(13)
+        t = tr_id_generate(13)
         output = subprocess.run([sys.executable, "-I", "-c", "import sys;sys.path.insert(0,%r);import trim;print(trim.mask_out(%r)[0])" % (BIN, t)],
                                capture_output=True, text=True).stdout.strip()
         self.assertEqual(output, trim.mask_out(t)[0])
@@ -243,16 +244,16 @@ class Masking(unittest.TestCase):
             lines.append(f'2026-10-28T12:{i % 60:02d}:45.123Z INFO req={i} ip=10.0.{i % 255}.{i % 200} ms={r.randint(1, 900)} '
                             f'trace=3fa9c7e1b2d4f60718293a4b5c6d7e8f msg="all good" size={r.randint(1, 10**9)}')
         for i in range(0, 60000, 200):
-            lines[i] += f" tc={tckn_generate(i)} tel=0532{r.randint(1000000, 9999999)} mail=u{i}@customer{i % 7}.com.tr"
+            lines[i] += f" tc={tr_id_generate(i)} tel=0532{r.randint(1000000, 9999999)} mail=u{i}@customer{i % 7}.com.tr"
         text = "\n".join(lines) + "\n"
         self.assertGreater(len(text), 5_000_000)
         t0 = time.time()
         y, s = self.m(text)
         elapsed = time.time() - t0
         self.assertLess(elapsed, 5.0, f"{elapsed:.2f}s")
-        self.assertEqual(s["TCKN"], 300)
-        self.assertEqual(s["EPOSTA"], 300)
-        self.assertEqual(s["TEL"], 300)
+        self.assertEqual(s["TR_ID"], 300)
+        self.assertEqual(s["EMAIL"], 300)
+        self.assertEqual(s["PHONE"], 300)
         print(f"\n[performans] {len(text) / 1e6:.1f} MB, {elapsed:.2f} s")
 
     def test_huge_text_timeout_fails_closed(self):
@@ -262,7 +263,7 @@ class Masking(unittest.TestCase):
             text = ("line 05321234567\n" * 200000)
             y, s = self.m(text)
             self.assertEqual(y, "[mask: time budget exceeded, 200000 lines withheld]\n")
-            self.assertEqual(s["ATLANDI"], 1)
+            self.assertEqual(s["SKIPPED"], 1)
         finally:
             trim.MASK_DURATION = previous
 
@@ -302,7 +303,7 @@ class Hook(unittest.TestCase):
         return {"tool_name": "Bash", "tool_input": {"command": command}, "tool_response": response}
 
     def test_bash_masks(self):
-        t = tckn_generate(21)
+        t = tr_id_generate(21)
         u = self.updated(self.bash("psql -c x", f"ad|tc|tel\nx|{t}|05321234567\n"))
         self.assertNotIn(t, u["stdout"])
         self.assertNotIn("05321234567", u["stdout"])
@@ -310,7 +311,7 @@ class Hook(unittest.TestCase):
         self.assertEqual(u["interrupted"], False)
 
     def test_bash_stderr_is_masked(self):
-        t = tckn_generate(22)
+        t = tr_id_generate(22)
         g = self.bash("x", "")
         g["tool_response"]["stderr"] = f"error: {t}"
         u = self.updated(g)
@@ -321,8 +322,8 @@ class Hook(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.home, ".claude", "tool-output")))
 
     def test_bash_big_output_truncated_and_stored_copy_masked(self):
-        t = tckn_generate(23)
-        lines = [f"line {i} tc={tckn_generate(100 + i)} tel=0532{1000000 + i}" for i in range(400)]
+        t = tr_id_generate(23)
+        lines = [f"line {i} tc={tr_id_generate(100 + i)} tel=0532{1000000 + i}" for i in range(400)]
         lines[200] = f"error line {t}"
         u = self.updated(self.bash("psql", "\n".join(lines) + "\n"))
         self.assertIn("truncated", u["stdout"])
@@ -332,15 +333,15 @@ class Hook(unittest.TestCase):
         self.assertEqual(len(files), 1)
         content = open(os.path.join(d, files[0]), encoding="utf-8").read()
         self.assertNotIn(t, content)
-        self.assertNotIn(tckn_generate(150), content)
+        self.assertNotIn(tr_id_generate(150), content)
         self.assertNotRegex(content, r"\b0532\d{7}\b")
         self.assertEqual(content.count("\n"), 400)
         self.assertEqual(oct(os.stat(os.path.join(d, files[0])).st_mode & 0o777), "0o600")
 
     def test_bash_persisted_file_masked_and_path_removed(self):
-        t = tckn_generate(24)
+        t = tr_id_generate(24)
         path = os.path.join(self.home, "kalici.txt")
-        full = "\n".join(f"s{i} {tckn_generate(300 + i)}" for i in range(500)) + f"\nson {t}\n"
+        full = "\n".join(f"s{i} {tr_id_generate(300 + i)}" for i in range(500)) + f"\nson {t}\n"
         open(path, "w").write(full)
         preview = full[:3000]
         u = self.updated(self.bash("psql", preview, persistedOutputPath=path, persistedOutputSize=len(full)))
@@ -352,7 +353,7 @@ class Hook(unittest.TestCase):
             self.assertNotIn(t, open(os.path.join(d, f)).read())
 
     def test_bash_masks_even_when_truncation_skipped(self):
-        t = tckn_generate(25)
+        t = tr_id_generate(25)
         u = self.updated(self.bash("git diff HEAD", f"+ tc = {t}\n"))
         self.assertNotIn(t, u["stdout"])
         # persisted file: masked in place, the path STAYS (the model will slice it)
@@ -364,12 +365,12 @@ class Hook(unittest.TestCase):
         self.assertEqual(u.get("persistedOutputPath"), path)
 
     def test_mcp_string_and_content_blocks(self):
-        t = tckn_generate(26)
+        t = tr_id_generate(26)
         g = {"tool_name": "mcp__grafana__query_loki_logs", "tool_input": {}, "tool_response": f'{{"line":"tc={t} 05321234567 a@b.com.tr"}}'}
         u = self.updated(g)
         self.assertIsInstance(u, str)
         self.assertNotIn(t, u)
-        json.loads(u.replace("[TCKN", "[TCKN"))  # JSON structure survives (tokens contain no quotes)
+        json.loads(u.replace("[TR_ID", "[TR_ID"))  # JSON structure survives (tokens contain no quotes)
         g = {"tool_name": "mcp__plugin_slack_slack__slack_read_channel", "tool_input": {},
              "tool_response": [{"type": "text", "text": f"customer {t}"}, {"type": "image", "data": "A" * 20 + "05321234567"}, {"type": "text", "text": "clean"}]}
         u = self.updated(g)
@@ -386,7 +387,7 @@ class Hook(unittest.TestCase):
         self.assertIsNone(self.updated(g))
 
     def test_read_only_in_temp_dirs(self):
-        t = tckn_generate(27)
+        t = tr_id_generate(27)
         g = lambda path: {"tool_name": "Read", "tool_input": {"file_path": path},
                          "tool_response": {"type": "text", "file": {"filePath": path, "content": f"tc {t}", "numLines": 1}}}
         u = self.updated(g("/tmp/mask-test-output.csv"))
@@ -403,7 +404,7 @@ class Hook(unittest.TestCase):
             self.assertIn("withheld", self.run_hook(raw, raw=True), raw)
 
     def test_key_created_0600_and_stable(self):
-        t = tckn_generate(28)
+        t = tr_id_generate(28)
         u1 = self.updated(self.bash("x", f"{t}\n"))["stdout"]
         path = os.path.join(self.home, ".claude", ".mask-key")
         self.assertEqual(oct(os.stat(path).st_mode & 0o777), "0o600")
@@ -416,7 +417,7 @@ class Hook(unittest.TestCase):
         self.assertNotIn(k1.strip()[:16], u1)
 
     def test_key_file_env_override(self):
-        t = tckn_generate(33)
+        t = tr_id_generate(33)
         custom = os.path.join(self.home, "elsewhere", "my.key")
         os.makedirs(os.path.dirname(custom))
         out = self.updated(self.bash("x", f"{t}\n"), env={"TRIM_KEY_FILE": custom})["stdout"]
@@ -427,15 +428,15 @@ class Hook(unittest.TestCase):
         self.assertEqual(out, self.updated(self.bash("x", f"{t}\n"), env={"TRIM_KEY_FILE": custom})["stdout"])
 
     def test_count_log_counts_only(self):
-        t = tckn_generate(29)
+        t = tr_id_generate(29)
         self.updated(self.bash("x", f"{t} 05321234567 ali@gmail.com\n"))
         log = open(os.path.join(self.home, ".claude", "mask-count.log"), encoding="utf-8").read()
-        self.assertRegex(log, r"tool=Bash EPOSTA=1 TCKN=1 TEL=1")
+        self.assertRegex(log, r"tool=Bash EMAIL=1 PHONE=1 TR_ID=1")
         for raw in (t, "05321234567", "ali@gmail.com", "gmail"):
             self.assertNotIn(raw, log)
 
     def test_masks_even_if_key_cannot_be_written(self):
-        t = tckn_generate(32)
+        t = tr_id_generate(32)
         os.chmod(os.path.join(self.home, ".claude"), 0o500)
         try:
             u = self.updated(self.bash("x", f"{t}\n"))
@@ -445,7 +446,7 @@ class Hook(unittest.TestCase):
             os.chmod(os.path.join(self.home, ".claude"), 0o700)
 
     def test_disable_env_var(self):
-        t = tckn_generate(30)
+        t = tr_id_generate(30)
         self.assertIsNone(self.updated(self.bash("x", f"{t}\n"), env={"TRIM_MASK_CLOSED": "1"}))
 
     def test_hook_truncation_behaviour(self):
@@ -491,10 +492,10 @@ class Credentials(unittest.TestCase):
         for c in cases:
             y = self.m(c)
             self.assertNotIn(V, y, c)
-            self.assertIn("[SIR:", y, c)
+            self.assertIn("[SECRET:", y, c)
             self.assertEqual(self.m(y), y, "idempotent: " + c)
-        self.assertTrue(self.m("password: %s" % V).startswith("password: [SIR:"))
-        self.assertTrue(self.m("Authorization: Bearer %s" % V).startswith("Authorization: Bearer [SIR:"))
+        self.assertTrue(self.m("password: %s" % V).startswith("password: [SECRET:"))
+        self.assertTrue(self.m("Authorization: Bearer %s" % V).startswith("Authorization: Bearer [SECRET:"))
         self.assertEqual(self.m("Sifre: %s" % V), self.m("password=%s" % V).replace("password=", "Sifre: "))
         self.assertEqual(self.m('{"password":"%s","user":"admin"}' % V).count('"user":"admin"'), 1)
 
@@ -504,7 +505,7 @@ class Credentials(unittest.TestCase):
                     "github_pat_" + "a1B2_" * 6, "cfut_" + "a1B2" * 6, "AKIA" + "ABCD1234EFGH5678", "xoxb-123456789012-abcdefABCDEF"):
             y = self.m(f"use {sec} now")
             self.assertNotIn(sec, y)
-            self.assertTrue(y.startswith("use [SIR:") and y.endswith("] now"), y)
+            self.assertTrue(y.startswith("use [SECRET:") and y.endswith("] now"), y)
         y = self.m(f"a\n{pem}\nb")
         self.assertNotIn("QUJDREVGR0g=", y)
         self.assertEqual(y.split("\n")[0] + y.split("\n")[-1], "ab")
@@ -512,7 +513,7 @@ class Credentials(unittest.TestCase):
 
     def test_false_positives(self):
         for t in ("the password is long and the token expires soon", "password", "token:", "password: ********",
-                  "password: [SIR:abcdef]", "token: null", "pass: true", 'password: ""', "password: ''", "password: abc",
+                  "password: [SECRET:abcdef]", "token: null", "pass: true", 'password: ""', "password: ''", "password: abc",
                   "password: $DB_PASS", "password: ${DB_PASS}", "password: {{ vault_pw }}", "password: <your-password>",
                   "token_type: Bearer", "secret_name: x", "password: $(DB_PASS)", 'password: "%DB_PASS%"',
                   "bypass: enabled-value", "db_pass: keepvalue1", "hvs.short", "AKIAshort", "password: required"):
@@ -530,26 +531,26 @@ class Credentials(unittest.TestCase):
                                   ("password: [abc12345", "[abc12345")):
             y = self.m(key_value)
             self.assertNotIn(secret, y, key_value)
-            self.assertIn("[SIR:", y, key_value)
+            self.assertIn("[SECRET:", y, key_value)
             self.assertEqual(self.m(y), y, "idempotent: " + key_value)
 
     def test_weak_literal_passwords_are_masked(self):
         for t in ("password: password", "token: token", "secret: Secret123", "password: secret"):
             y = self.m(t)
-            self.assertTrue(y.startswith(t.split(":")[0] + ": [SIR:"), t)
+            self.assertTrue(y.startswith(t.split(":")[0] + ": [SECRET:"), t)
 
     def test_placeholders_stay_untouched(self):
         for t in ("password: ${DB_PASS}", "password: ${db.pass}", "password: $DB_PASS", "password: $(DB_PASS)", "password: <your-password>",
                   "password: {{ secrets.pw }}", "password: {{secrets.pw}}", 'password: "{{ secrets.pw }}"', "password: %DB_PASS%",
-                  "password: ********", "password: xxxxxxxx", 'password: "<redacted>"', "password=[SIR:abcdef]",
-                  "password: [TEL:abcdef]", "token: null", "token: None", "secret: FALSE", "password: empty", "pwd: ----"):
+                  "password: ********", "password: xxxxxxxx", 'password: "<redacted>"', "password=[SECRET:abcdef]",
+                  "password: [PHONE:abcdef]", "token: null", "token: None", "secret: FALSE", "password: empty", "pwd: ----"):
             self.assertEqual(self.m(t), t)
 
     def test_closing_bracket_belongs_to_value_only_if_balanced(self):
         self.assertEqual(self.m("(password=Abcd1234)"), "(password=%s)" % self.m("password=Abcd1234")[len("password="):])
         y = self.m("password: Admin(2026)")
-        self.assertTrue(y.startswith("password: [SIR:") and y.endswith("]"), y)  # the whole value, not "Admin(2026" + ")"
-        self.assertEqual(len(y), len("password: [SIR:abcdef12]"))
+        self.assertTrue(y.startswith("password: [SECRET:") and y.endswith("]"), y)  # the whole value, not "Admin(2026" + ")"
+        self.assertEqual(len(y), len("password: [SECRET:abcdef12]"))
 
     def test_property_never_leaks(self):
         rnd = random.Random(7)
@@ -615,7 +616,7 @@ class Robustness(unittest.TestCase):
             "mixed quotes": r("password=' password=\" "), "unicode keys": r("\u015fifre_"), "api-key *N": r("api-key "),
             **self.adversarial_round2(size, r),
             "digit run": "1" * size, "digits+space": r("1 "), "5-run": "5" * size, "0 *N": r("0 "), "0532 *N": r("0532 "),
-            "+90 5 *N": r("+90 5"), "tckn-like": r("12345678901 "), "card-like": r("4111 1111 1111 111"), "card dashes": r("1234-"),
+            "+90 5 *N": r("+90 5"), "tr_id-like": r("12345678901 "), "card-like": r("4111 1111 1111 111"), "card dashes": r("1234-"),
             "BEGIN without END": "-----BEGIN " "PRIVATE KEY-----\n" + "a" * size, "BEGIN*N": r("-----BEGIN " "PRIVATE KEY----- "),
             "BEGIN A*N": r("-----BEGIN A "), "BEGIN upper": "-----BEGIN " + "A " * (size // 2),
             "email local": "a" * size + "@", "email a@": r("a@"), "email a.a": r("a.a", post="@b"), "email domain a-": r("a-", "x@"),
@@ -633,7 +634,7 @@ class Robustness(unittest.TestCase):
             for name, text in self.adversarial(size).items():
                 elapsed, y, s = self.timed(text)
                 self.assertLess(elapsed, self.LIMIT, f"{name} x {size}: {elapsed:.2f}s")
-                self.assertEqual(s["ATLANDI"], 0, f"{name} x {size}: withheld")
+                self.assertEqual(s["SKIPPED"], 0, f"{name} x {size}: withheld")
 
     def test_old_redos_input_is_fast(self):
         # before the fix 26 repetitions took 14 s and every further one doubled it
@@ -647,7 +648,7 @@ class Robustness(unittest.TestCase):
         elapsed, y, s = self.timed(text)
         self.assertLess(elapsed, self.LIMIT * 2)
         self.assertNotIn("Zx9-Synthetic", y)
-        self.assertEqual(s["SIR"], text.count("\n"))
+        self.assertEqual(s["SECRET"], text.count("\n"))
 
     def test_budget_exhausted_fails_closed_small_text(self):
         previous = trim.MASK_DURATION
@@ -655,7 +656,7 @@ class Robustness(unittest.TestCase):
             trim.MASK_DURATION = 0.0
             y, s = trim.mask_out("user=a\npassword: Zx9-Synthetic-Value-1234\n")
             self.assertEqual(y, "[mask: time budget exceeded, 2 lines withheld]\n")
-            self.assertEqual(s["ATLANDI"], 1)
+            self.assertEqual(s["SKIPPED"], 1)
         finally:
             trim.MASK_DURATION = previous
 
@@ -676,10 +677,10 @@ class Robustness(unittest.TestCase):
             y, s = trim.mask_out(text)
         finally:
             trim._mask_out_part, trim.MASK_DURATION = original, previous
-        self.assertEqual(s["ATLANDI"], 1)
+        self.assertEqual(s["SKIPPED"], 1)
         self.assertNotIn("Zx9-Synthetic", y)
         self.assertEqual(y.count("[mask: time budget exceeded"), 1)
-        self.assertTrue(y.startswith("line 0 password: [SIR:"))
+        self.assertTrue(y.startswith("line 0 password: [SECRET:"))
         self.assertTrue(y.endswith(" lines withheld]\n"))
 
     @unittest.skipUnless(hasattr(__import__("signal"), "setitimer"), "POSIX only")
@@ -710,7 +711,7 @@ class Robustness(unittest.TestCase):
         finally:
             trim._mask_out_part = original
         self.assertEqual(y, "[mask: masking error, 1 lines withheld]\n")
-        self.assertEqual(s["ATLANDI"], 1)
+        self.assertEqual(s["SKIPPED"], 1)
 
     def test_command_filter_regex_is_linear(self):
         for cmd in ("git " * 50_000, "git log " + "x " * 100_000, "git " * 20_000 + "show"):
@@ -751,7 +752,7 @@ class Robustness(unittest.TestCase):
 
 
 class Boundary(unittest.TestCase):
-    """No match may be lost because the text is masked in pieces (PARCA): every class of match is placed exactly across the
+    """No match may be lost because the text is masked in pieces (PIECE): every class of match is placed exactly across the
     cut of the old splitter (last newline / last space or comma / hard cut)."""
     PEM_LINES = ["QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo" + "%02d" % i + "abcdefghijklmnopqrstuvwxyz0123456789" for i in range(40)]
 
@@ -760,12 +761,12 @@ class Boundary(unittest.TestCase):
 
     def cases(self):
         P = trim.PART
-        tc, iban = tckn_generate(41), iban_generate(42)
+        tc, iban = tr_id_generate(41), iban_generate(42)
         card = luhn_generate("4", 16, 43)
         yield "key-value after space", "y" * (P - 20) + " password: Zx9SyntheticValue1234" + "z" * 1000, ["Zx9SyntheticValue1234"]
         yield "key-value quoted comma", "y" * (P - 20) + ' {"password":"Zx9,Synthetic,Value1234"} ' + "z" * 1000, ["Zx9", "Value1234"]
         yield "key-value no space at all", "|" * (P - 6) + "password=Zx9SyntheticValue1234|" + "z" * 1000, ["Zx9SyntheticValue1234"]
-        yield "tckn", "|" * (P - 5) + tc + "|" + "z" * 1000, [tc]
+        yield "tr_id", "|" * (P - 5) + tc + "|" + "z" * 1000, [tc]
         yield "iban", "|" * (P - 10) + iban + "|" + "z" * 1000, [iban[4:]]
         yield "iban spaced", "y" * (P - 20) + " " + iban_format(iban) + " " + "z" * 1000, [iban[4:8], iban[-4:]]
         yield "email", "|" * (P - 5) + "alice.smith@customer.com.tr" + "|" + "z" * 1000, ["alice.smith", "customer"]
@@ -783,12 +784,12 @@ class Boundary(unittest.TestCase):
             y, s = trim.mask_out(text)
             for leak in leaks:
                 self.assertFalse(leak in y, f"{name}: leaked {leak[:12]}...")
-            self.assertEqual(s["ATLANDI"], 0, name)
+            self.assertEqual(s["SKIPPED"], 0, name)
 
     def test_pem_block_is_one_token_and_the_text_around_it_stays(self):
         text = "x\n" * ((trim.PART - 300) // 2) + self.pem() + "\nafter\n"
         y, s = trim.mask_out(text)
-        self.assertEqual(y.count("[SIR:"), 1)
+        self.assertEqual(y.count("[SECRET:"), 1)
         self.assertEqual(y.count("PRIVATE KEY"), 0)
         self.assertTrue(y.endswith("\nafter\n"))
 
@@ -822,15 +823,15 @@ class Boundary(unittest.TestCase):
             y, s = trim.mask_out("short\n" + "A" * 5000 + " password: Zx9SyntheticValue1234\nlast password: Zx9SyntheticValue1234\n")
         finally:
             trim.UNIT_MAX, trim.PART = previous
-        self.assertTrue(y.startswith("short\n[mask: line too long, 1 lines withheld]\nlast password: [SIR:"), y[:80])
+        self.assertTrue(y.startswith("short\n[mask: line too long, 1 lines withheld]\nlast password: [SECRET:"), y[:80])
         self.assertFalse("Zx9Synthetic" in y)
-        self.assertEqual(s["ATLANDI"], 1)
+        self.assertEqual(s["SKIPPED"], 1)
 
     def test_split_equals_whole(self):
         # property: masking in small pieces gives the same text as masking the whole text at once
         rnd = random.Random(5)
         secrets_ = [lambda i: f"password: Zx9-Synthetic-{i:06d}", lambda i: f'{{"token":"Zx9-Synthetic-{i:06d}"}}',
-                    lambda i: f"tc={tckn_generate(i)}", lambda i: f"mail=u{i}@customer{i % 5}.com.tr", lambda i: f"tel=0532 {i % 900 + 100} 00 00",
+                    lambda i: f"tc={tr_id_generate(i)}", lambda i: f"mail=u{i}@customer{i % 5}.com.tr", lambda i: f"tel=0532 {i % 900 + 100} 00 00",
                     lambda i: f"ghp_{'a1B2' * 9}", lambda i: iban_generate(i), lambda i: " ".join(["w"] * rnd.randint(1, 80))]
         pem = self.pem()
         lines = []
@@ -846,8 +847,8 @@ class Boundary(unittest.TestCase):
             for size in (200, 777, 5000):
                 trim.PART = size
                 y, s = trim.mask_out(text)
-                self.assertEqual(y, whole, f"PARCA={size}")
-                self.assertEqual(s["ATLANDI"], 0)
+                self.assertEqual(y, whole, f"PIECE={size}")
+                self.assertEqual(s["SKIPPED"], 0)
         finally:
             trim.PART = previous
         self.assertNotIn("Zx9-Synthetic", whole)
@@ -867,7 +868,7 @@ class Round2High(unittest.TestCase):
 
     # ---- finding 1: the id skip must not cover person / subscriber / card keys
     def test_person_id_keys_do_not_hide_pii(self):
-        tel, tc, card = tel_generate(1), tckn_generate(51), luhn_generate("4", 16, 52)
+        tel, tc, card = tel_generate(1), tr_id_generate(51), luhn_generate("4", 16, 52)
         keys = ("caller_id", "callerid", "CallerID", "subscriber_id", "musteri_id", "abone_id", "customer_id", "card_id", "paid",
                 "Said", "national_id", "citizen_id", "caller-id", "caller.id", "Caller ID", "callee_id", "kart_id", "user_id",
                 "person_id", "msisdn_id", "fraud", "valid", "tc_id", "TcId")
@@ -878,7 +879,7 @@ class Round2High(unittest.TestCase):
                         self.assertNotIn(val, self.m(text))
 
     def test_ci_id_keys_still_skip_numbers(self):
-        tc = tckn_generate(53)
+        tc = tr_id_generate(53)
         card = luhn_generate("4", 16, 54)
         for key in ("run_id", "job_id", "check_run_id", "check_suite_id", "workflow_id", "artifact_id", "runId", "jobId", "RUN_ID",
                     "github.run_id", "GITHUB_RUN_ID", "run-id", "CheckRunID", "pipeline_id", "build_id"):
@@ -888,7 +889,7 @@ class Round2High(unittest.TestCase):
                         self.assertEqual(self.m(text), text)
 
     def test_only_the_full_allowlisted_key_skips(self):
-        tc, tel, card = tckn_generate(59), tel_generate(4), luhn_generate("4", 16, 60)
+        tc, tel, card = tr_id_generate(59), tel_generate(4), luhn_generate("4", 16, 60)
         keys = ("caller-id", "caller.id", "callerId", "CallerID", "x-customer-id", "abone_no_id", "kimlik-id", "foo_id", "id", "ID",
                 "myrun_id", "run_id_x", "x.run_id", "my-job-id", "xjob_id", "data.id", "\u00e7a\u011fr\u0131_id")
         for key in keys:
@@ -919,7 +920,7 @@ class Round2High(unittest.TestCase):
             trim._END_AT = None
 
     def test_surrogate_in_key_still_masks_and_emits(self):
-        t = tckn_generate(55)
+        t = tr_id_generate(55)
         for tool in ("mcp__x__y",):
             payload = json.dumps({"tool_name": tool, "tool_response": {"structuredContent": {"k\ud800": f"tc {t}"}}})
             raw = self.hook_inprocess(payload)
@@ -929,13 +930,13 @@ class Round2High(unittest.TestCase):
             self.assertEqual(len(o["structuredContent"]), 1)
 
     def test_key_carrying_data_is_masked_too(self):
-        t = tckn_generate(56)
+        t = tr_id_generate(56)
         raw = self.hook_inprocess(json.dumps({"tool_name": "mcp__x__y", "tool_response": {t: "v", "n": {f"a {t}": 1}}}))
         self.assertTrue(raw.strip())
         self.assertNotIn(t, raw)
 
     def test_last_resort_still_emits_when_everything_fails(self):
-        t = tckn_generate(57)
+        t = tr_id_generate(57)
         payload = json.dumps({"tool_name": "mcp__x__y", "tool_response": {"a": f"tc {t}"}})
         originals = (trim._general, trim._hide, trim._json_yaz)
         calls = []
@@ -959,7 +960,7 @@ class Round2High(unittest.TestCase):
         self.assertIn("withheld", raw)
 
     def test_hook_output_is_pure_ascii_json(self):
-        t = tckn_generate(58)
+        t = tr_id_generate(58)
         raw = self.hook_inprocess(json.dumps({"tool_name": "mcp__x__y", "tool_response": [{"text": f"şifre \ud800 {t}"}]}))
         self.assertTrue(raw.isascii(), "ensure_ascii")
         self.assertNotIn(t, raw)
@@ -974,7 +975,7 @@ class Round2High(unittest.TestCase):
                 with self.subTest(text=text.replace(V, "<v>")):
                     y = self.m(text)
                     self.assertNotIn(V, y)
-                    self.assertIn("[SIR:", y)
+                    self.assertIn("[SECRET:", y)
 
     def test_camel_case_does_not_hit_ordinary_words(self):
         for text in ("mypassword: abcdefgh", "compass = abcdefgh", "bypass: abcdefgh", "cancellationToken: cancellationToken",
@@ -993,7 +994,7 @@ class Round2Medium(unittest.TestCase):
         secret = secret or self.V
         y = self.m(text)
         self.assertNotIn(secret, y, text)
-        self.assertIn("[SIR:", y, text)
+        self.assertIn("[SECRET:", y, text)
         self.assertEqual(self.m(y), y, "idempotent: " + text)
 
     # ---- finding 4: credential forms
@@ -1002,7 +1003,7 @@ class Round2Medium(unittest.TestCase):
                   "amqp://guest:%s@mq/vhost", "mongodb+srv://u:%s@cluster0.mongodb.net/db?retryWrites=true"):
             self.assertMasked(t % self.V)
         y = self.m("postgresql://app:%s@10.0.0.5/db" % self.V)
-        self.assertTrue(y.startswith("postgresql://app:[SIR:") and y.endswith("]@10.0.0.5/db"), y)
+        self.assertTrue(y.startswith("postgresql://app:[SECRET:") and y.endswith("]@10.0.0.5/db"), y)
         for t in ("ssh://git@github.com:22/x", "http://host:8080/path", "https://example.com:443/a@b", "git@github.com:org/repo.git",
                   "postgresql://app:${DB_PASS}@host/db", "postgresql://app:<password>@host/db", 
                   "see https://example.com/a:b@c now"):
@@ -1045,7 +1046,7 @@ class Round2Medium(unittest.TestCase):
                   "password: \n  %s # comment"):
             y = self.m(t % self.V)
             self.assertNotIn(self.V, y, t)
-            self.assertIn("[SIR:", y, t)
+            self.assertIn("[SECRET:", y, t)
         y = self.m("password:\n  %s\nuser: bob" % self.V)
         self.assertTrue(y.endswith("\nuser: bob"), y)
         for t in ("password:\n  secretKeyRef:\n    name: x\n", "password:\nuser: bob", "password:\n- item\n", "token:\n  # comment\n",
@@ -1072,11 +1073,11 @@ class Round2Medium(unittest.TestCase):
                      "a" * (P - len("db:\r\n  token:\r\n") - 1) + "\n" + "db:\r\n  token:\r\n    " + self.V + "\r\nafter\r\n"):
             y, s = trim.mask_out(text)
             self.assertNotIn(self.V, y)
-            self.assertEqual(s["ATLANDI"], 0)
+            self.assertEqual(s["SKIPPED"], 0)
 
     # ---- finding 5: ANSI colour codes
     def test_ansi_colour_codes_do_not_hide_values(self):
-        tc, tel, card = tckn_generate(61), tel_generate(3), luhn_generate("4", 16, 62)
+        tc, tel, card = tr_id_generate(61), tel_generate(3), luhn_generate("4", 16, 62)
         for v in (tc, tel, card, "90" + tel[1:], tel[:4] + " " + tel[4:7] + " " + tel[7:9] + " " + tel[9:]):  # bare 5XX.. needs a key (round 3)
             for t in (f"\x1b[32m{v}\x1b[0m", f"\x1b[1;31m{v}\x1b[m end", f"x \x1b[0;32m{v}\x1b[39m", f"\x1b(B{v}\x1b(B", f"\x1b[?25h{v}",
                       f"\x1b]8;;http://x\x07{v}\x1b]8;;\x07", f"{v[:3]}\x1b[0m{v[3:]}"):
@@ -1097,14 +1098,14 @@ class Round2Medium(unittest.TestCase):
             self.assertLess(time.perf_counter() - t0, 2.0, repr(unit))
 
     def test_zero_width_characters_inside_digits(self):
-        tc = tckn_generate(63)
+        tc = tr_id_generate(63)
         for z in ("​", "‌", "‍", "⁠", "﻿", "­"):
             self.assertNotIn(tc, self.m(tc[:5] + z + tc[5:]).replace(z, ""))
             self.assertNotIn(tc[:5], self.m(tc[:5] + z + tc[5:]))
 
     # ---- finding 6: every tool the hook is wired to is routed
     def test_other_tools_are_masked(self):
-        tc = tckn_generate(64)
+        tc = tr_id_generate(64)
         for tool in ("Grep", "Glob", "WebFetch", "SomeNewTool"):
             raw = Round2High.hook_inprocess(self, json.dumps({"tool_name": tool, "tool_response": {"content": f"a.txt:3:tc {tc}", "numLines": 1}}))
             self.assertTrue(raw.strip(), tool)
@@ -1113,24 +1114,24 @@ class Round2Medium(unittest.TestCase):
             self.assertEqual(o["numLines"], 1)
 
     def test_read_of_repo_files_stays_unmasked(self):
-        tc = tckn_generate(65)
+        tc = tr_id_generate(65)
         raw = Round2High.hook_inprocess(self, json.dumps({"tool_name": "Read", "tool_input": {"file_path": "/home/x/repo/a.txt"},
                                                           "tool_response": {"file": {"content": tc}}}))
         self.assertEqual(raw.strip(), "")
 
     # ---- finding 7: the filter budget starts after the input is read
     def test_slow_producer_is_not_withheld(self):
-        tc = tckn_generate(66)
+        tc = tr_id_generate(66)
         e = dict(os.environ, TRIM_MASK_DURATION="1")
         p = subprocess.Popen([sys.executable, "-I", TRIM], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=e)
         time.sleep(2.2)
         out, _ = p.communicate(f"tc {tc}\n", timeout=30)
         self.assertNotIn(tc, out)
-        self.assertIn("[TCKN:", out)
+        self.assertIn("[TR_ID:", out)
         self.assertNotIn("withheld", out)
 
     def test_slow_hook_producer_is_not_withheld(self):
-        tc = tckn_generate(67)
+        tc = tr_id_generate(67)
         home = tempfile.mkdtemp(prefix="mask-test-")
         try:
             e = dict(os.environ, HOME=home, TRIM_MASK_DURATION="1")
@@ -1141,7 +1142,7 @@ class Round2Medium(unittest.TestCase):
             out, _ = p.communicate(json.dumps({"tool_name": "mcp__x__y", "tool_response": f"tc {tc}"}), timeout=30)
             self.assertNotIn(tc, out)
             self.assertNotIn("withheld", out)
-            self.assertIn("TCKN", out)
+            self.assertIn("TR_ID", out)
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
@@ -1183,9 +1184,9 @@ class Round2Low(unittest.TestCase):
             shutil.rmtree(home, ignore_errors=True)
 
     def test_tokens_are_eight_hex_digits_and_old_tokens_count_as_masked(self):
-        y = self.m(f"tc {tckn_generate(70)}")
-        self.assertRegex(y, r"\[TCKN:[0-9a-f]{8}\]")
-        for tok in ("[SIR:" + "abcdef" + "]", "[SIR:" + "abcdef01" + "]", "[TEL:" + "0a1b2c" + "]"):
+        y = self.m(f"tc {tr_id_generate(70)}")
+        self.assertRegex(y, r"\[TR_ID:[0-9a-f]{8}\]")
+        for tok in ("[SECRET:" + "abcdef" + "]", "[SECRET:" + "abcdef01" + "]", "[PHONE:" + "0a1b2c" + "]"):
             self.assertEqual(self.m(f"password={tok}"), f"password={tok}")
 
     # ---- finding 9: availability
@@ -1194,11 +1195,11 @@ class Round2Low(unittest.TestCase):
             t0 = time.perf_counter()
             y, s = trim.mask_out(text)
             self.assertLess(time.perf_counter() - t0, 2.0)
-            self.assertEqual(s["ATLANDI"], 0)
-        self.assertEqual(trim._sir_closing("Admin(2026)"), ("Admin(2026)", ""))
-        self.assertEqual(trim._sir_closing("abc))"), ("abc", "))"))
-        self.assertEqual(trim._sir_closing("a(b)])"), ("a(b)", "])"))
-        self.assertEqual(trim._sir_closing("a[b]]}"), ("a[b]", "]}"))
+            self.assertEqual(s["SKIPPED"], 0)
+        self.assertEqual(trim._secret_closing("Admin(2026)"), ("Admin(2026)", ""))
+        self.assertEqual(trim._secret_closing("abc))"), ("abc", "))"))
+        self.assertEqual(trim._secret_closing("a(b)])"), ("a(b)", "])"))
+        self.assertEqual(trim._secret_closing("a[b]]}"), ("a[b]", "]}"))
 
     def test_budget_is_enforced_between_pieces_in_a_thread(self):
         import threading
@@ -1224,7 +1225,7 @@ class Round2Low(unittest.TestCase):
             trim._mask_out_core, trim.MASK_DURATION = original, saved
         self.assertLess(result["t"], 2.2)
         self.assertIn("time budget exceeded", result["y"])
-        self.assertEqual(result["s"]["ATLANDI"], 1)
+        self.assertEqual(result["s"]["SKIPPED"], 1)
 
     # ---- finding 10: gaps
     def test_phone_separators(self):
@@ -1237,8 +1238,8 @@ class Round2Low(unittest.TestCase):
         for f in forms:
             with self.subTest(form=f.encode("unicode_escape").decode()):
                 y, s = trim.mask_out(f"call {f} done")
-                self.assertEqual(s["TEL"], 1)
-                self.assertNotIn(b, y.replace("[TEL", ""))
+                self.assertEqual(s["PHONE"], 1)
+                self.assertNotIn(b, y.replace("[PHONE", ""))
         same = {trim.mask_out(f)[0] for f in forms[:6] + [tel]}
         self.assertEqual(len(same), 1, same)
         for g in ("10.0.19045.5371", "5.0.0.1", "1.0.532.123", "0.532.123.45.67", "v1.2.3.4", "2026.10.28.1234", "192.0.2.250",
@@ -1247,14 +1248,14 @@ class Round2Low(unittest.TestCase):
 
     def test_non_ascii_digits(self):
         fw, ar = str.maketrans("0123456789", "".join(chr(0xFF10 + i) for i in range(10))), str.maketrans("0123456789", "".join(chr(0x660 + i) for i in range(10)))
-        tc, tel, card = tckn_generate(71), tel_generate(6), luhn_generate("4", 16, 72)
+        tc, tel, card = tr_id_generate(71), tel_generate(6), luhn_generate("4", 16, 72)
         for tr in (fw, ar):
             for v in (tc, tel, card, "90" + tel[1:], "+90" + tel[1:], " ".join(card[i:i + 4] for i in range(0, 16, 4))):
                 w = v.translate(tr)
                 with self.subTest(v=w.encode("unicode_escape").decode()):
                     y = self.m(f"x {w} y")
                     self.assertNotIn(w, y)
-                    self.assertRegex(y, r"\[(TCKN|TEL|KART):")
+                    self.assertRegex(y, r"\[(TR_ID|PHONE|CARD):")
         self.assertEqual(self.m(tc.translate(fw)), self.m(tc))  # one value, one token
         t = "Arabic digits " + "".join(chr(0x660 + i) for i in range(5)) + " stay"
         self.assertEqual(self.m(t), "Arabic digits 01234 stay")  # the normalised text always comes back
@@ -1263,7 +1264,7 @@ class Round2Low(unittest.TestCase):
         for a in ("çağrı@firma.com", "müşteri@örnek.com.tr", "ali.veli@şirket.com.tr", "info@örnek.com", "ÖZGE@Firma.COM", "dev@corp.py",
                   "ali@firma.md", "x@y.sh", "bob@company.zip", "a@bb.rs", "u@host.so", "me@site.py"):
             y, s = trim.mask_out(f"mail {a} end")
-            self.assertEqual(s["EPOSTA"], 1, a)
+            self.assertEqual(s["EMAIL"], 1, a)
             self.assertNotIn("@", y)
         for g in ("image@2x.png", "x@1000.service", "pkg@1.2.3", "a@b.json", "foo@bar.css", "z@y.yaml"):
             self.assertEqual(self.m(g), g, g)
@@ -1292,7 +1293,7 @@ class Round2Review(unittest.TestCase):
         return trim.mask_out(s)[0]
 
     def test_text_inside_removed_sequences_is_never_emitted(self):
-        tc, tel = tckn_generate(80), tel_generate(8)
+        tc, tel = tr_id_generate(80), tel_generate(8)
         for t in (f"a\x1b]0;{tc}\x07b", f"a\x1b]0;password=Zx9Synth1234\x07b", f"a\x1b]8;;{tel}\x1b\\b", f"a\x1b[{tc}mb", f"a\x1b[{tel};1mb",
                   f"a\x1b]0;{tc}b", f"a \x1b(0{tc} b"):
             with self.subTest(t=t.replace(tc, "<tc>").replace(tel, "<tel>")):
@@ -1308,7 +1309,7 @@ class Round2Review(unittest.TestCase):
 
     def test_output_never_contains_a_sequence_that_was_not_scanned(self):
         # whatever is not removed must have been scanned: the result is the masked NORMALISED text
-        tc = tckn_generate(81)
+        tc = tr_id_generate(81)
         y = self.m("\x1b[1m" + tc + "\x1b[0m \x1b]0;title\x07 end")
         self.assertNotIn("\x1b", y)
         self.assertNotIn(tc, y)
@@ -1326,7 +1327,7 @@ class Round2Review(unittest.TestCase):
                 y, s = trim.mask_out(text)
                 for line in body:
                     self.assertNotIn(line[:20], y, n)
-                self.assertEqual(s["ATLANDI"], 0)
+                self.assertEqual(s["SKIPPED"], 0)
                 self.assertTrue(y.endswith("after\n"))
                 pieces = list(trim._parts(text))
                 for a, b in pieces:
@@ -1345,12 +1346,12 @@ class Round2Review(unittest.TestCase):
             y, s = trim.mask_out(text)
             self.assertNotIn(body[3][:20], y)
             self.assertNotIn("Zx9Synth1234", y)
-            self.assertEqual(s["ATLANDI"], 0)
+            self.assertEqual(s["SKIPPED"], 0)
         finally:
             trim.PART = previous
 
     def test_structure_survives_an_exhausted_budget(self):
-        tc = tckn_generate(82)
+        tc = tr_id_generate(82)
         payload = json.dumps({"tool_name": "mcp__x__y", "tool_response": {"content": [{"type": "text", "text": tc}], "isError": False}})
         saved = trim.MASK_DURATION
         trim.MASK_DURATION = 0.0
@@ -1365,7 +1366,7 @@ class Round2Review(unittest.TestCase):
         self.assertIn("withheld", o["content"][0]["text"])
 
     def test_structure_survives_the_withhold_path_with_an_exhausted_budget(self):
-        tc = tckn_generate(83)
+        tc = tr_id_generate(83)
         payload = json.dumps({"tool_name": "mcp__x__y", "tool_response": {"content": [{"type": "text", "text": tc}], "isError": False, tc: 1}})
         saved, orig = trim.MASK_DURATION, trim._general
 
@@ -1384,7 +1385,7 @@ class Round2Review(unittest.TestCase):
         self.assertEqual(len(o), 3)  # content, isError and the data-carrying key under a placeholder
 
     def test_keys_that_can_carry_data_are_still_masked(self):
-        tc, tel = tckn_generate(84), tel_generate(9)
+        tc, tel = tr_id_generate(84), tel_generate(9)
         for key in (tc, f"a {tc}", f"x@{tc}", tel, f"id={tc}", "café " + tc):
             o, _ = trim._mask_out_tree({key: 1, "type": "text"}, collections.Counter())
             self.assertNotIn(tc, json.dumps(o), key)
@@ -1410,13 +1411,13 @@ class KeyAllScanned(unittest.TestCase):
         for key in (f"{d[:3]}-{d[3:6]}-{d[6:8]}-{d[8:]}", f"0{d[:3]}.{d[3:6]}.{d[6:8]}.{d[8:]}"):
             k = self.mask(key)
             self.assertNotEqual(k, key)
-            self.assertIn("[TEL:", k)
+            self.assertIn("[PHONE:", k)
 
-    def test_tckn_with_zero_width_char(self):
-        tc = tckn_generate(7)
+    def test_tr_id_with_zero_width_char(self):
+        tc = tr_id_generate(7)
         k = self.mask(tc[:5] + "\u200b" + tc[5:])
         self.assertNotIn(tc, k)
-        self.assertIn("[TCKN:", k)
+        self.assertIn("[TR_ID:", k)
 
     def test_github_token_key(self):
         tok = "ghp_" + "".join(random.Random(3).choice("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") for _ in range(36))
@@ -1470,31 +1471,31 @@ class Round3Digits(unittest.TestCase):
         self.assertNotIn(raw, re.sub(r"\D", "", re.sub(r"\[[A-Z]+:[0-9a-f]{8}\]", "", y)), text.encode("unicode_escape").decode())
         self.assertGreaterEqual(s[turn], 1, text.encode("unicode_escape").decode())
 
-    def test_tckn_glued_to_letters_dots_and_underscores(self):
-        t = tckn_generate(301)
+    def test_tr_id_glued_to_letters_dots_and_underscores(self):
+        t = tr_id_generate(301)
         for text in (f"No.{t}", f"T.C.{t}", f"TC{t}", f"{t}.0", f"kimlik_{t}.pdf", f"{t}_scan.pdf", f"id{t}", f"user_{t}", f"{t}b",
                      f"/srv/musteri_{t}_1.pdf"):
-            self.assertMasked(text, t, "TCKN")
+            self.assertMasked(text, t, "TR_ID")
 
-    def test_tckn_in_groups(self):
-        t = tckn_generate(302)
+    def test_tr_id_in_groups(self):
+        t = tr_id_generate(302)
         for sep in (" ", "-", ".", " ", "  "):
-            self.assertMasked(f"x {sep.join((t[:3], t[3:6], t[6:9], t[9:]))} y", t, "TCKN")
+            self.assertMasked(f"x {sep.join((t[:3], t[3:6], t[6:9], t[9:]))} y", t, "TR_ID")
 
     def test_decimal_and_longer_runs_stay(self):
-        t = tckn_generate(303)
+        t = tr_id_generate(303)
         for text in (f"1.{t}", f"0{t}", f"{t}1", t[:9]):
             self.assertEqual(self.m(text), text, text)
-        self.assertMasked(f"1,{t},x", t, "TCKN")  # CSV: a comma is a column separator, not a decimal point
+        self.assertMasked(f"1,{t},x", t, "TR_ID")  # CSV: a comma is a column separator, not a decimal point
 
     def test_phone_glued_and_split_by_unusual_separators(self):
         tel = tel_generate(304)
         a, b, c, d = tel[0:4], tel[4:7], tel[7:9], tel[9:11]
         for text in (f"Tel.{tel}", f"Tel{tel}", f"x{tel}y"):
-            self.assertMasked(text, tel[1:], "TEL")
+            self.assertMasked(text, tel[1:], "PHONE")
         for sep in ("  ", " ", "‑", "–", " - "):
-            self.assertMasked("ara " + sep.join((a, b, c, d)) + " son", tel[1:], "TEL")
-            self.assertMasked("ara +90 " + sep.join((a[1:], b, c, d)) + " son", tel[1:], "TEL")
+            self.assertMasked("ara " + sep.join((a, b, c, d)) + " son", tel[1:], "PHONE")
+            self.assertMasked("ara +90 " + sep.join((a[1:], b, c, d)) + " son", tel[1:], "PHONE")
 
     def test_iban_and_card_split_by_unusual_separators(self):
         iban = iban_generate(305)
@@ -1502,14 +1503,14 @@ class Round3Digits(unittest.TestCase):
         for sep in ("  ", " ", "‑", "–", "-"):
             self.assertMasked("i " + iban[:4] + sep + sep.join(iban[i:i + 4] for i in range(4, 24, 4)) + sep + iban[24:] + " .",
                               iban[4:], "IBAN")
-            self.assertMasked("k " + sep.join(card[i:i + 4] for i in range(0, 16, 4)) + " .", card, "KART")
+            self.assertMasked("k " + sep.join(card[i:i + 4] for i in range(0, 16, 4)) + " .", card, "CARD")
         self.assertMasked(f"IBAN{iban}", iban[4:], "IBAN")
-        self.assertMasked(f"kart{card}", card, "KART")
+        self.assertMasked(f"kart{card}", card, "CARD")
 
     def test_control_and_format_characters_between_digits(self):
-        t = tckn_generate(307)
+        t = tr_id_generate(307)
         for ch in ("‎", "‏", "⁦", "\x00", "\x08", "\r", "\x7f", "́", "️", "­​"):
-            self.assertMasked(f"x {t[:5]}{ch}{t[5:]} y", t, "TCKN")
+            self.assertMasked(f"x {t[:5]}{ch}{t[5:]} y", t, "TR_ID")
         self.assertEqual(self.m("a\r\nb\tc"), "a\r\nb\tc")
 
     def test_bare_ten_digit_numbers_starting_with_5_are_not_phones(self):
@@ -1526,7 +1527,7 @@ class Round3Digits(unittest.TestCase):
                      f"gsm={n}", f"Caller: {n}", f"{n[:3]} {n[3:6]} {n[6:8]} {n[8:]}", f"{n[:3]}-{n[3:6]}-{n[6:]}", tel, "+90" + n,
                      "90" + n, f"({n[:3]}) {n[3:6]} {n[6:8]} {n[8:]}", f"phones: {n}", f"telefonlar={n}", f"Telefonlari: {n}",
                      f"numaralar: {n}"):
-            self.assertMasked(text, n, "TEL")
+            self.assertMasked(text, n, "PHONE")
         o, _ = trim._mask_out_tree({"phones": [n], "telefonlar": n}, collections.Counter())
         self.assertNotIn(n, json.dumps(o))
         for text in (f"hotel {n}", f"intel={n}", f"except {n}", f"accept: {n}"):
@@ -1536,17 +1537,17 @@ class Round3Digits(unittest.TestCase):
         # the matrix doc line: `Test GSM: `5XXXXXXXXX`` (backtick between the key and the number)
         n = "5000000000"
         for text in (f"Test GSM: `{n}`", f"Test GSM: {n}", f"tel: `{n}`", f'"gsm": `{n}`'):
-            self.assertMasked(text, n, "TEL")
+            self.assertMasked(text, n, "PHONE")
 
     def test_spaced_and_dashed_mobile_forms_are_masked(self):
         for form in ("500 000 00 00", "500-000-00-00", "500 000 0000", "500-000-0000", "500\t000\t0000"):
-            self.assertMasked(f"Test GSM: `{form}`", "5000000000", "TEL")
-            self.assertMasked(f"tel: {form}", "5000000000", "TEL")
+            self.assertMasked(f"Test GSM: `{form}`", "5000000000", "PHONE")
+            self.assertMasked(f"tel: {form}", "5000000000", "PHONE")
 
     def test_zero_prefixed_and_plus90_forms_still_masked(self):
         for text in ("0500 000 00 00", "0500-000-00-00", "+90 500 000 00 00", "+90 (500) 000 00 00", "905000000000",
                      "0090 500 000 00 00", "tel: 0500 000 00 00", "Test GSM: `+90 500 000 00 00`"):
-            self.assertMasked(text, "5000000000", "TEL")
+            self.assertMasked(text, "5000000000", "PHONE")
 
     def test_uuid_and_message_ids_with_digit_runs_are_not_masked(self):
         for text in ("550e8400-e29b-41d4-a716-446655440000", "550e8400-e29b-41d4-a716-5000000000ab",
@@ -1560,14 +1561,14 @@ class Round3Digits(unittest.TestCase):
                      "tel: 5000000000123", "`5000000000`", "epoch 5000000000123"):
             self.assertEqual(self.m(text), text, text)
 
-    def test_github_ids_are_not_tckn(self):
-        t = tckn_generate(310)  # stands in for an 11-digit run/job id that happens to pass the checksum
+    def test_github_ids_are_not_tr_id(self):
+        t = tr_id_generate(310)  # stands in for an 11-digit run/job id that happens to pass the checksum
         for text in (f'"databaseId": {t}', f"database_id={t}", f"https://github.com/o/r/actions/runs/{t}/job/{t}",
                      f"/actions/runs/1/job/{t}", f'"run_id": "{t}"'):
             self.assertEqual(self.m(text), text, text)
 
     def test_number_leaves(self):
-        tc, tel, card = tckn_generate(311), tel_generate(312), luhn_generate("4", 16, 313)
+        tc, tel, card = tr_id_generate(311), tel_generate(312), luhn_generate("4", 16, 313)
         n = tel[1:]
         say = collections.Counter()
         o, ch = trim._mask_out_tree({"tckn": int(tc), "x": float(tc), "tel": int("90" + n), "phone": int(n), "k": int(card),
@@ -1582,11 +1583,11 @@ class Round3Digits(unittest.TestCase):
         self.assertEqual(o["n"], 12)
 
     def test_string_leaves_use_their_key_as_context(self):
-        tc, tel = tckn_generate(314), tel_generate(315)
+        tc, tel = tr_id_generate(314), tel_generate(315)
         n = tel[1:]
         o, _ = trim._mask_out_tree({"tel": n, "run_id": tc, "size": n, "rows": [{"phone": n}]}, collections.Counter())
-        self.assertIn("[TEL:", o["tel"])
-        self.assertIn("[TEL:", o["rows"][0]["phone"])
+        self.assertIn("[PHONE:", o["tel"])
+        self.assertIn("[PHONE:", o["rows"][0]["phone"])
         self.assertEqual(o["run_id"], tc)
         self.assertEqual(o["size"], n)
 
@@ -1604,16 +1605,16 @@ class Round3Encoded(unittest.TestCase):
             with self.subTest(at=at):
                 y, s = trim.mask_out(text)
                 self.assertNotIn(local, y)
-                self.assertEqual(s["EPOSTA"], 1)
+                self.assertEqual(s["EMAIL"], 1)
 
-    def test_encoded_phone_and_tckn(self):
-        tel, t = tel_generate(330), tckn_generate(331)
+    def test_encoded_phone_and_tr_id(self):
+        tel, t = tel_generate(330), tr_id_generate(331)
         y = self.m(f"?tel=%2B90{tel[1:]}&x=1")
         self.assertNotIn(tel[1:], y)
         y, say = trim.mask_out("tc=" + "".join(f"&#{ord(c)};" for c in t))
-        self.assertEqual(say["TCKN"], 1, y)
+        self.assertEqual(say["TR_ID"], 1, y)
         y, say = trim.mask_out('{"tc": "' + "".join(f"\\u{ord(c):04x}" for c in t) + '"}')
-        self.assertEqual(say["TCKN"], 1, y)
+        self.assertEqual(say["TR_ID"], 1, y)
 
     def test_lines_without_a_decoded_match_stay_encoded(self):
         tel = tel_generate(332)
@@ -1623,18 +1624,18 @@ class Round3Encoded(unittest.TestCase):
         self.assertEqual(len(lines), 4)
         self.assertEqual(lines[0], "a%20b&amp;c \\u00e7")
         self.assertEqual(lines[2], "z%0Ay")  # a decoded newline / control character is never produced
-        self.assertTrue(lines[1].startswith("q=[TEL:"), lines[1])
+        self.assertTrue(lines[1].startswith("q=[PHONE:"), lines[1])
 
     def test_decoding_never_unmasks_what_the_original_caught(self):
-        t, tel = tckn_generate(333), tel_generate(334)
-        # (`%30<TCKN>` / `\\u0030<TCKN>` are a longer digit run in both views and stay, like `0<TCKN>`)
+        t, tel = tr_id_generate(333), tel_generate(334)
+        # (`%30<TR_ID>` / `\\u0030<TR_ID>` are a longer digit run in both views and stay, like `0<TR_ID>`)
         for pre in ("&#48;", "&#x31;", "&#53;&#x35;"):
             text = f"{pre}{t} mail=ayse.yilmaz%40ornekfirma.com.tr"
             with self.subTest(pre=pre):
                 y, s = trim.mask_out(text)
                 self.assertNotIn(t, y)
                 self.assertNotIn("ayse.yilmaz", y)
-                self.assertGreaterEqual(s["TCKN"], 1)
+                self.assertGreaterEqual(s["TR_ID"], 1)
         y = self.m(f"x {tel}%35 &#64; ayse.yilmaz%40ornekfirma.com.tr")
         self.assertNotIn(tel[1:], y)
         self.assertNotIn("ayse.yilmaz", y)
@@ -1645,7 +1646,7 @@ class Round3Encoded(unittest.TestCase):
             t0 = time.perf_counter()
             y, s = trim.mask_out(text)
             self.assertLess(time.perf_counter() - t0, Robustness.LIMIT, unit)
-            self.assertEqual(s["ATLANDI"], 0, unit)
+            self.assertEqual(s["SKIPPED"], 0, unit)
 
 
 class Round3Credentials(unittest.TestCase):
@@ -1708,7 +1709,7 @@ class Round3Credentials(unittest.TestCase):
     def test_http_and_cli_auth(self):
         V = self.V
         y = self.hidden(f"Cookie: sid={V}; theme=dark")
-        self.assertTrue(y.startswith("Cookie: sid=[SIR:"), y)
+        self.assertTrue(y.startswith("Cookie: sid=[SECRET:"), y)
         y = self.hidden(f"< Set-Cookie: session={V}; Path=/; HttpOnly")
         self.assertIn("Path=/; HttpOnly", y)
         self.hidden(f"-H 'Cookie: a={V}'")
@@ -1735,7 +1736,7 @@ class Round3Credentials(unittest.TestCase):
                     "rk_live_" + g(24), "npm_" + g(36), "ASIA" + "".join(r.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") for _ in range(16))):
             y = self.m(f"use {sec} now")
             self.assertNotIn(sec[-12:], y, sec[:8])
-            self.assertTrue(y.startswith("use [SIR:") and y.endswith("] now"), y)
+            self.assertTrue(y.startswith("use [SECRET:") and y.endswith("] now"), y)
         hook = "https://hooks.slack.com/services/T0" + g(8) + "/B0" + g(8) + "/" + g(24)
         self.assertNotIn(hook[-24:], self.m(f"url {hook}"))
         ppk = ("PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\nComment: x\nPublic-Lines: 2\n" + g(64) + "\n" + g(20) + "\n"
@@ -1778,7 +1779,7 @@ class Round3Hook(Round3HookBase):
     """Third review, hook level: Grep file names, gh run ids."""
 
     def test_grep_file_names_are_masked(self):
-        t = tckn_generate(320)
+        t = tr_id_generate(320)
         out = self.run_hook({"tool_name": "Grep", "tool_input": {"pattern": "x"},
                              "tool_response": {"mode": "files_with_matches", "numFiles": 2,
                                                "filenames": [f"/srv/data/kimlik_{t}.pdf", f"/srv/data/{t}_scan.pdf"]}})
@@ -1786,14 +1787,14 @@ class Round3Hook(Round3HookBase):
         self.assertNotIn(t, out)
 
     def test_gh_run_list_ids_stay(self):
-        t = tckn_generate(321)
+        t = tr_id_generate(321)
         line = f"completed\tsuccess\tCI\tCI\tdev\tpush\t{t}\t3m2s\t2026-10-28T10:00:00Z\n"
         for cmd in ("gh run list --limit 5", "gh run list -b dev --json x", "  gh run watch 5"):
             self.assertEqual(self.eff(cmd, line), line, cmd)
         self.assertNotIn(t, self.eff("gh run view 123 --log", line))
 
     def test_gh_exemption_is_positional_and_single_command(self):
-        t, x = tckn_generate(322), tckn_generate(323)
+        t, x = tr_id_generate(322), tr_id_generate(323)
         row = f"completed\tsuccess\tCI\tCI\tdev\tpush\t{t}\t3m2s\t2026-10-28T10:00:00Z\n"
         other = f"ad,tc\nAyse,{x}\n"
         for cmd in ("gh run list; cat musteriler.csv", "gh run list && cat x", "gh run list | cat - x", "echo $(cat x); gh run list",
@@ -1851,7 +1852,7 @@ class Round3HookRobust(Round3HookBase):
     it cannot parse."""
 
     def test_huge_tree_of_short_keys_answers_in_time_with_one_notice(self):
-        t = tckn_generate(350)
+        t = tr_id_generate(350)
         resp = {f"k{i}": "a" for i in range(1_500_000)}
         resp.update({f"z{i}": f"u {t}" for i in range(1000)})
         b = json.dumps({"tool_name": "mcp__x__y", "tool_input": {}, "tool_response": resp}).encode()
@@ -1877,7 +1878,7 @@ class Round3HookRobust(Round3HookBase):
         return out
 
     def test_every_bash_field_is_masked(self):
-        t = tckn_generate(351)
+        t = tr_id_generate(351)
         line = f"user {t} ok"
         for resp in ({"stdout": "", "stderr": "", "extra": line}, {"stdout": [line], "stderr": ""}, {"stdout": {"text": line}},
                      line, [{"type": "text", "text": line}], {"stdout": line, "isImage": True},
@@ -1885,7 +1886,7 @@ class Round3HookRobust(Round3HookBase):
             self.assertNotIn(t, self.bash_out(resp))
 
     def test_image_block_text_fields_are_masked(self):
-        t = tckn_generate(353)
+        t = tr_id_generate(353)
         out = self.run_hook({"tool_name": "mcp__x__y", "tool_input": {},
                              "tool_response": [{"type": "image", "data": "QUJD", "mimeType": "image/png", "text": f"a {t}"}]})
         self.assertNotIn(t, out)
@@ -1898,7 +1899,7 @@ class Round3HookRobust(Round3HookBase):
         self.assertEqual(out.strip(), "")
 
     def test_unparseable_or_odd_input_fails_closed(self):
-        t = tckn_generate(352)
+        t = tr_id_generate(352)
         good = json.dumps({"tool_name": "Bash", "tool_input": {"command": "x"},
                            "tool_response": {"stdout": f"a {t}", "stderr": ""}}).encode()
         deep = ('{"tool_name":"mcp__x","tool_response":' + "[" * 100_000 + json.dumps(f"a {t}") + "]" * 100_000 + "}").encode()
@@ -1913,10 +1914,10 @@ class Round3HookRobust(Round3HookBase):
 
 class Filter(unittest.TestCase):
     def test_pipe_mode_masks(self):
-        t = tckn_generate(31)
+        t = tr_id_generate(31)
         p = subprocess.run([sys.executable, "-I", TRIM], input=f"a {t} b\n", capture_output=True, text=True)
         self.assertNotIn(t, p.stdout)
-        self.assertIn("[TCKN:", p.stdout)
+        self.assertIn("[TR_ID:", p.stdout)
 
 
 class Round4CodeLiterals(unittest.TestCase):
@@ -1949,8 +1950,8 @@ class Round4CodeLiterals(unittest.TestCase):
                      f'smtp.Credentials = new NetworkCredential("user@corp.test", "{self.P}");',
                      f'Add("X-API-Key",\n        "{K}")'):
             y = self.hidden(text, K, B, self.P)
-            self.assertIn("[SIR:", y, text)
-        self.assertIn('"Bearer [SIR:', self.m(f'req.Headers.Add("Authorization", "Bearer {B}");'))  # the scheme word stays
+            self.assertIn("[SECRET:", y, text)
+        self.assertIn('"Bearer [SECRET:', self.m(f'req.Headers.Add("Authorization", "Bearer {B}");'))  # the scheme word stays
 
     def test_code_pairs_that_are_not_secrets_stay(self):
         for text in ('client.DefaultRequestHeaders.Add("Accept", "application/json");', 'h.Add("X-Request-Id", "abc-123-def");',
@@ -1965,15 +1966,15 @@ class Round4CodeLiterals(unittest.TestCase):
             self.hidden(text, P, "short-pass1")
 
     def test_partly_masked_or_cut_value_leaves_no_fragment(self):
-        self.hidden('  "SmtpPassword": "Xy9!kL[SIR:aa7c6163]', "Xy9!kL")
-        self.hidden('  "SmtpPassword": "Xy9![SIR:aa7c6163]kLm2",', "Xy9!", "kLm2")
+        self.hidden('  "SmtpPassword": "Xy9!kL[SECRET:aa7c6163]', "Xy9!kL")
+        self.hidden('  "SmtpPassword": "Xy9![SECRET:aa7c6163]kLm2",', "Xy9!", "kLm2")
         y = self.hidden("SmtpPassword=Ab9 xY 12 zz", "xY", "zz")
-        self.assertTrue(y.startswith("SmtpPassword=[SIR:"), y)
+        self.assertTrue(y.startswith("SmtpPassword=[SECRET:"), y)
         self.hidden("password: a b c d1", "b c")
 
     def test_line_tail_rule_is_narrow(self):
         self.assertEqual(self.m("Pass: 1234 Failed: 0"), "Pass: 1234 Failed: 0")  # test summary
-        self.assertTrue(self.m("password=[SIR:0457c42a],user=bob").endswith(",user=bob"))
+        self.assertTrue(self.m("password=[SECRET:0457c42a],user=bob").endswith(",user=bob"))
         self.assertTrue(self.m("Server=db;Password=Ab9xY12;Database=x").endswith(";Database=x"))
         self.assertTrue(self.m("var p = GetPassword();").endswith("();") or "GetPassword" in self.m("var p = GetPassword();"))
 
@@ -1983,7 +1984,7 @@ class Round4CodeLiterals(unittest.TestCase):
                      f'var cs = "Server=db.test;Password=\\"{Q}\\";";', f"s = 'Server=db.test;Password=\\'{Q}\\';'",
                      f'"Default": "Server=db.test;User Id=sa;Password={Q};TrustServerCertificate=true"'):
             y = self.hidden(text, Q)
-            self.assertIn("[SIR:", y, text)
+            self.assertIn("[SECRET:", y, text)
 
     def test_json_secret_keys(self):
         K = self.K

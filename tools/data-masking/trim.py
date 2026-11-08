@@ -4,9 +4,9 @@
 BEST-EFFORT SAFETY NET, not a guarantee: regex masking of untrusted free text cannot be complete. The control is not reading
 raw personal data (counts, aggregates, masked samples; masking at the source). See README "Not a guarantee" / "Known limits".
 
-MASKING: TCKN (Turkish national ID, with checksum), payment cards (Luhn), Turkish IBANs (mod 97), e-mail addresses and
+MASKING: TR_ID (Turkish national ID, with checksum), payment cards (Luhn), Turkish IBANs (mod 97), e-mail addresses and
 Turkish mobile/landline numbers are replaced by stable tokens built from a local keyed HMAC:
-[TCKN:ab12cd] [TEL:..] [EPOSTA:..] [IBAN:..] [KART:..]. The same value always gives the same token (so the model can still
+[TR_ID:ab12cd] [PHONE:..] [EMAIL:..] [IBAN:..] [CARD:..]. The same value always gives the same token (so the model can still
 correlate rows) and the token cannot be reversed without the key. Masking runs before truncation and before the full
 output is stored under ~/.claude/tool-output/, so the stored copy is masked too.
 
@@ -33,7 +33,7 @@ Truncation threshold: more than 250 lines or 30 KB. The first 60 and last 60 lin
 lines from the middle (at most 40) stay visible. The full output goes to ~/.claude/tool-output/<time>-<hash>.txt, files
 older than 7 days are deleted. Add a `# full-output` comment to the command to skip truncation. Environment: TRIM_THRESHOLD_LINE,
 TRIM_THRESHOLD_BYTES, TRIM_CLOSED=1 (truncation off), TRIM_MASK_DURATION (masking time budget, seconds).
-Fail closed: masking never lets text through unmasked. Text is masked in pieces (PARCA characters) under a time budget
+Fail closed: masking never lets text through unmasked. Text is masked in pieces (PIECE characters) under a time budget
 (TRIM_MASK_DURATION, default 7 s, hard maximum 20 s; the hook timeout is 30 s). A piece that is not finished when the budget
 runs out, or that raises, is replaced by a one-line notice instead of being passed through. All patterns are linear-time.
 """
@@ -51,7 +51,7 @@ import unicodedata
 DIR = os.path.expanduser("~/.claude/tool-output")
 THRESHOLD_LINE = int(os.environ.get("TRIM_THRESHOLD_LINE", "250"))
 THRESHOLD_BYTES = int(os.environ.get("TRIM_THRESHOLD_BYTES", "30000"))
-BAS = LAST = 60
+HEAD = LAST = 60
 ERROR_MAX = 40
 LINE_LENGTH = 600
 ERROR_RE = re.compile(r"error|fail|exception|traceback|fatal", re.I)
@@ -83,47 +83,48 @@ _PERMISSION = None
 ALLOWED_FIELD = ("github.com", "users.noreply.github.com", "anthropic.com", "example.com", "example.org", "example.net",
                "localhost", "example.com", "example.org", "example.net", "invalid", "test")
 # look like e-mail addresses but are file names / systemd units: the suffix is not a TLD
-MAIL_SUFFIX_OUTSIDE = frozenset(
+EMAIL_SUFFIX_EXCLUDED = frozenset(
     "png jpg jpeg gif svg webp ico bmp css js mjs json xml txt log yml yaml cs dll exe o h c cpp go gz tar tgz bz2 xz "
     "pdf html htm map ts tsx jsx lock conf cfg ini toml sql db sqlite bak tmp service socket timer target mount path scope slice swap "
     "device automount nupkg snupkg whl jar war class rpm deb img iso vhd vhdx ova ovf".split())
 
 # Digit boundaries: a number must not be part of a longer digit run and must not be the fraction of a decimal (`1.<digits>`).
-# Letters, `_`, `.` and `,` around it do not protect it: `No.<TCKN>`, `TC<TCKN>`, `identity_<TCKN>.pdf`, `<TCKN>.0`, CSV `1,<TCKN>,x`.
-_SOL = r"(?<!\d)(?<!\d\.)"
+# Letters, `_`, `.` and `,` around it do not protect it: `No.<TR_ID>`, `TC<TR_ID>`, `identity_<TR_ID>.pdf`, `<TR_ID>.0`, CSV `1,<TR_ID>,x`.
+_LEFT_EDGE = r"(?<!\d)(?<!\d\.)"
 _RIGHT = r"(?!\d)"
 _SPACE = "    "  # NBSP, figure space, thin space, narrow NBSP
 _DASH = "‐‑‒–—−"  # hyphen, non-breaking hyphen, figure dash, en dash, em dash, minus sign
 # separator between digit groups: one or two blanks, or a dash (any dash) with an optional blank on each side
-_GAYR = r"(?:[ \t" + _SPACE + r"]{1,2}|[ \t]?[\-" + _DASH + r"][ \t]?)"
-RE_IBAN = re.compile(r"(?<!\d)[Tt][Rr]\d{2}(?:" + _GAYR + r"?\d{4}){5}" + _GAYR + r"?\d{2}" + _RIGHT)
-RE_KART = re.compile(
-    _SOL + r"(?:\d{4}(" + _GAYR + r")\d{4}\1\d{4}\1\d{4}|\d{4}(" + _GAYR + r")\d{6}\2\d{5}|\d{13,19})" + _RIGHT)
+_BLANK_DASH_SEP = r"(?:[ \t" + _SPACE + r"]{1,2}|[ \t]?[\-" + _DASH + r"][ \t]?)"
+RE_IBAN = re.compile(r"(?<!\d)[Tt][Rr]\d{2}(?:" + _BLANK_DASH_SEP + r"?\d{4}){5}" + _BLANK_DASH_SEP + r"?\d{2}" + _RIGHT)
+RE_CARD = re.compile(
+    _LEFT_EDGE + r"(?:\d{4}(" + _BLANK_DASH_SEP + r")\d{4}\1\d{4}\1\d{4}|\d{4}(" + _BLANK_DASH_SEP + r")\d{6}\2\d{5}|\d{13,19})" + _RIGHT)
 RE_MAIL = re.compile(
-    r"(?<![\w.%+\-])[^\W_][\w.%+\-]*@(?:[^\W_](?:[\w\-]*[^\W_])?\.)+[^\W\d_]{2,24}(?![\w\-]|@)")  # Unicode letters: [EPOSTA:bacc144a] in Turkish
-RE_TCKN = re.compile(_SOL + r"[1-9]\d{10}" + _RIGHT)
+    r"(?<![\w.%+\-])[^\W_][\w.%+\-]*@(?:[^\W_](?:[\w\-]*[^\W_])?\.)+[^\W\d_]{2,24}(?![\w\-]|@)")  # Unicode letters: [EMAIL:bacc144a] in Turkish
+RE_TR_ID = re.compile(_LEFT_EDGE + r"[1-9]\d{10}" + _RIGHT)
 # 3-3-3-2 groups (`123 456 789 01`, also with dots or dashes); a dotted group that is a valid IPv4 address is left alone
-RE_TCKN_GRUP = re.compile(_SOL + r"[1-9]\d{2}(" + _GAYR + r"|\.)\d{3}\1\d{3}\1\d{2}" + _RIGHT)
+RE_TR_ID_GROUPED = re.compile(_LEFT_EDGE + r"[1-9]\d{2}(" + _BLANK_DASH_SEP + r"|\.)\d{3}\1\d{3}\1\d{2}" + _RIGHT)
 _LAST = _RIGHT
-_ON = _SOL
-_AYR = _GAYR  # separator inside a phone number with a 0 / +90 prefix: blanks (also NBSP, thin), any dash, tab
-_AYR1 = r"[ \t\-" + _SPACE + _DASH + r"]"  # without a prefix: ONE character (two blanks between numbers look like table columns)
+_LEAD = _LEFT_EDGE
+_SEP = _BLANK_DASH_SEP  # separator inside a phone number with a 0 / +90 prefix: blanks (also NBSP, thin), any dash, tab
+_SEP1 = r"[ \t\-" + _SPACE + _DASH + r"]"  # without a prefix: ONE character (two blanks between numbers look like table columns)
 # with country prefix: +90 / 0090 / 90; optional (0); 3+3+2+2 digits
-RE_TEL_COUNTRY = re.compile(
-    _ON + r"(?:\+" + _AYR + r"?90|0090|90)" + _AYR + r"?(?:\(0\)" + _AYR + r"?)?\(?[2-5]\d{2}\)?" + _AYR + r"?\d{3}" + _AYR + r"?\d{2}" + _AYR + r"?\d{2}" + _LAST)
+RE_PHONE_COUNTRY = re.compile(
+    _LEAD + r"(?:\+" + _SEP + r"?90|0090|90)" + _SEP + r"?(?:\(0\)" + _SEP + r"?)?\(?[2-5]\d{2}\)?" + _SEP + r"?\d{3}" + _SEP + r"?\d{2}" + _SEP + r"?\d{2}" + _LAST)
 # leading-0 form: 0 5XX XXX XX XX (also with dashes, parentheses, 0(5XX)...)
-RE_TEL_ZERO = re.compile(_ON + r"0" + _AYR + r"?\(?[2-5]\d{2}\)?" + _AYR + r"?\d{3}" + _AYR + r"?\d{2}" + _AYR + r"?\d{2}" + _LAST)
+RE_PHONE_ZERO = re.compile(_LEAD + r"0" + _SEP + r"?\(?[2-5]\d{2}\)?" + _SEP + r"?\d{3}" + _SEP + r"?\d{2}" + _SEP + r"?\d{2}" + _LAST)
 # dotted: 0532.123.45.67, +90.532.123.45.67, 0532.123.4567 (a dot is only accepted after a 0 / 90 / +90 / 0090 prefix, in the 3.3.2.2 shape)
-RE_TEL_POINT = re.compile(
-    _ON + r"(?:(?:\+90|0090|90)\.?|0)[2-5]\d{2}\.\d{3}\.(?:\d{2}\.\d{2}|\d{4})" + _LAST)
+RE_PHONE_POINT = re.compile(
+    _LEAD + r"(?:(?:\+90|0090|90)\.?|0)[2-5]\d{2}\.\d{3}\.(?:\d{2}\.\d{2}|\d{4})" + _LAST)
 # parenthesised area code without prefix: (5XX) XXX XX XX
-RE_TEL_PAREN = re.compile(_ON + r"\([2-5]\d{2}\)" + _AYR + r"?\d{3}" + _AYR + r"?\d{2}" + _AYR + r"?\d{2}" + _LAST)
+RE_PHONE_PAREN = re.compile(_LEAD + r"\([2-5]\d{2}\)" + _SEP + r"?\d{3}" + _SEP + r"?\d{2}" + _SEP + r"?\d{2}" + _LAST)
 # mobile without prefix: 5XX XXX XX XX, 5XX-XXX-XXXX; the bare 5XXXXXXXXX form only next to a phone-like key (see _tel_context):
 # without one it is a size, a byte count or a row number far more often than a phone number
-RE_TEL_CEP = re.compile(
-    _ON + r"5\d{2}(?:(" + _AYR1 + r")\d{3}\1\d{2}\1\d{2}(?!\1\d)|(" + _AYR1 + r")\d{3}\2\d{4}(?!\2\d)|\d{7})" + _LAST)
+RE_PHONE_CEP = re.compile(
+    _LEAD + r"5\d{2}(?:(" + _SEP1 + r")\d{3}\1\d{2}\1\d{2}(?!\1\d)|(" + _SEP1 + r")\d{3}\2\d{4}(?!\2\d)|\d{7})" + _LAST)
 # phone-like key right before a bare number: `tel: `, `"msisdn":"`, `callerPhone=`, `Telefon No. ` (not `hotel`, `except`, `intel`)
-RE_TEL_KEY = re.compile(
+# Turkish locale data: the Turkish words in the phone-key pattern below (telefon, numara, arayan, aranan, ...) are matching input (the masker reads Turkish tool output), not untranslated prose.
+RE_PHONE_KEY = re.compile(
     r"(?:(?<![A-Za-z])(?i:tel(?:efon(?:u|no)?)?|phone|gsm|cep|mobil(?:e)?|msisdn|numara(?:s[iı])?|caller|callee|arayan|aranan"
     r"|clid|dnis|ani|fax|faks|sms|whatsapp|src|dst)|(?<=[a-z0-9])(?:Tel|Phone|Gsm|Cep|Mobile|Mobil|Msisdn|Numara|Caller|Callee))"
     r"(?i:s|lar|ler|lar[i\u0131]|ler[i\u0131])?"  # plural: phones, telefonlar, numaraları
@@ -133,13 +134,13 @@ RE_TEL_KEY = re.compile(
 RE_ID_KEY = re.compile(r"(?<![A-Za-z0-9_.\-])([A-Za-z0-9_.\-]{1,60})[\"']?\s*[:=]\s*[\"']?$")
 # ALLOWLIST: a number is left alone only when the full key, normalised (camelCase boundaries and `.`/`-` become `_`, lower case),
 # is exactly one of these CI / GitHub style ids. Anything else - `caller_id`, `x-customer-id`, `abone_no_id`, `identity-id`, `paid`,
-# `Said`, a bare `id` - is masked when the value is a valid TCKN / card / phone: no list of person words can be complete.
+# `Said`, a bare `id` - is masked when the value is a valid TR_ID / card / phone: no list of person words can be complete.
 ID_KEYS = frozenset((
     "run_id job_id check_run_id check_suite_id workflow_id workflow_run_id artifact_id release_id asset_id comment_id deployment_id "
     "review_id status_id milestone_id label_id event_id build_id pipeline_id issue_id pull_request_id installation_id repository_id "
     "repo_id step_id task_id github_run_id github_job_id ci_job_id ci_pipeline_id ci_build_id database_id").split())
 RE_KEY_LIMIT = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
-RE_ID_YOL = re.compile(
+RE_ID_PATH = re.compile(
     r"(?i)/(?:runs|jobs|job|comments|check-runs|check-suites|artifacts|releases|assets|statuses|deployments|reviews|labels|milestones|events)/$")
 
 
@@ -184,9 +185,9 @@ def _key():
     return _KEY
 
 
-def _token(turn, norm):
-    h = hmac.new(_key(), f"{turn}:{norm}".encode("utf-8", "surrogatepass"), hashlib.sha256).hexdigest()[:8]
-    return f"[{turn}:{h}]"
+def _token(kind, norm):
+    h = hmac.new(_key(), f"{kind}:{norm}".encode("utf-8", "surrogatepass"), hashlib.sha256).hexdigest()[:8]
+    return f"[{kind}:{h}]"
 
 
 def _permissions():
@@ -209,7 +210,7 @@ def _permissions():
     return _PERMISSION
 
 
-def _tckn_valid(s):
+def _tr_id_valid(s):
     d = [int(c) for c in s]
     return (((d[0] + d[2] + d[4] + d[6] + d[8]) * 7 - (d[1] + d[3] + d[5] + d[7])) % 10 == d[9]
             and sum(d[:10]) % 10 == d[10])
@@ -245,15 +246,15 @@ def _iban_valid(s):
 # Context of a dict leaf being masked (set by _mask_out_tree for short leaves): the leaf's key stands in for the text in front
 # of a number at the very start of the leaf (`{"run_id": "<11 digits>"}`, `{"tel": "5XXXXXXXXX"}`).
 _LEAF_KEY = None
-# `gh run list|view|watch` and `gh api .../actions/runs|jobs` print 11-digit run / job ids that can pass the TCKN checksum.
+# `gh run list|view|watch` and `gh api .../actions/runs|jobs` print 11-digit run / job ids that can pass the TR_ID checksum.
 # _bash sets _GH_IDENTITY only when the WHOLE command is one such gh call (no `;`, `&&`, `|`, `$(`, backticks, newline ...), and even
 # then only numbers in an id POSITION stay readable (see _gh_location): the ID column of `gh run list`, `· <id>` / `(ID <id>)` in
-# `gh run view`, an `id` key in `gh api` JSON. Any other valid TCKN in the output is masked.
+# `gh run view`, an `id` key in `gh api` JSON. Any other valid TR_ID in the output is masked.
 _GH_IDENTITY = False
 RE_GH_COMMAND = re.compile(r"\s*gh\s+(?:run\s+(?:list|view|watch)|api\s+\S*actions/(?:runs|jobs))\b[^\n]*")
 RE_GH_LOG = re.compile(r"--log|/logs\b")
 RE_COMMAND_SEPARATOR = re.compile(r"[;&|\n\r`]|\$\(|[<>]\(")
-RE_GH_ONU = re.compile(r"(?:\(ID |\bID:? |\u00b7 |\brun #?|#)$")
+RE_GH_PREFIX = re.compile(r"(?:\(ID |\bID:? |\u00b7 |\brun #?|#)$")
 GH_ID_KEYS = frozenset(("id", "database_id", "run_id", "job_id", "check_run_id", "workflow_id"))
 
 
@@ -269,7 +270,7 @@ def _gh_location(text, start, last):
     on = text[ls:start]
     if on.count("\t") == 6 and text[last:last + 1] in ("\t", "\n", ""):
         return True  # `gh run list` (not a terminal): STATUS CONCLUSION TITLE WORKFLOW BRANCH EVENT ID ELAPSED AGE
-    if RE_GH_ONU.search(on[-8:]):
+    if RE_GH_PREFIX.search(on[-8:]):
         return True
     m = RE_ID_KEY.search(text[max(0, start - 80):start])
     return bool(m) and _key_norm(m.group(1)) in GH_ID_KEYS
@@ -287,8 +288,8 @@ def _key_norm(k):
 def _tel_context(text, start):
     """Is a bare 5XXXXXXXXX number the value of a phone-like key? Only then it is masked as a phone number."""
     if _leaf_head(text, start):
-        return RE_TEL_KEY.search(_LEAF_KEY[-60:] + ":") is not None
-    return RE_TEL_KEY.search(text[max(0, start - 60):start]) is not None
+        return RE_PHONE_KEY.search(_LEAF_KEY[-60:] + ":") is not None
+    return RE_PHONE_KEY.search(text[max(0, start - 60):start]) is not None
 
 
 def _id_context(text, start):
@@ -303,11 +304,12 @@ def _id_context(text, start):
         k = RE_KEY_LIMIT.sub("_", m.group(1)).lower().replace("-", "_").replace(".", "_")
         if k in ID_KEYS:
             return True
-    return bool(RE_ID_YOL.search(on))
+    return bool(RE_ID_PATH.search(on))
 
 
 # --- credentials (conservative): key=value pairs with a known credential key + well-known token shapes ---
-_SIR_KEY = (r"password|passwd|pwd|secret|client_secret|token|access_token|refresh_token|api_key|apikey|api-key|"
+# Turkish locale data: the Turkish words in the credential-key list below (sifre, parola, anahtar-sifre) are matching input (the masker reads Turkish tool output), not untranslated prose.
+_SECRET_KEY = (r"password|passwd|pwd|secret|client_secret|token|access_token|refresh_token|api_key|apikey|api-key|"
                 r"authorization|private_key|private-key|privatekey|sifre|şifre|parola|anahtar-sifre|passphrase|"
                 r"access[_.\-]?key|signing[_.\-]?key|auth[_.\-]?key|encryption[_.\-]?key|master[_.\-]?key|"
                 r"validation[_.\-]?key|decryption[_.\-]?key")  # the last two: ASP.NET <machineKey validationKey= decryptionKey=>
@@ -316,42 +318,44 @@ _SIR_KEY = (r"password|passwd|pwd|secret|client_secret|token|access_token|refres
 # plain `pass` additionally must not be preceded by `_`.
 # camelCase / PascalCase keys (`ClientSecret`, `adminPassword`, `accessToken`): a capitalised keyword right after a letter or digit.
 # Case-sensitive on purpose (`(?-i:...)`), so lower-case `mypassword` / `compass` still do not match. `cancellationToken` is C# plumbing.
-_SIR_DEVE = (r"(?-i:(?<=[A-Za-z0-9])(?<!ancellation)(?:Password|Passwd|Pwd|Secret|Token|ApiKey|Authorization|PrivateKey|Sifre|\u015eifre|Parola"
+# Turkish locale data: the Turkish words in the camelCase credential keys below (Sifre, Parola) are matching input (the masker reads Turkish tool output), not untranslated prose.
+_SECRET_CAMEL = (r"(?-i:(?<=[A-Za-z0-9])(?<!ancellation)(?:Password|Passwd|Pwd|Secret|Token|ApiKey|Authorization|PrivateKey|Sifre|\u015eifre|Parola"
              r"|Passphrase|AccessKey|SigningKey|AuthKey|EncryptionKey|MasterKey|ValidationKey|DecryptionKey|Pass(?![a-z])))")  # `SmtpPass`, `MailPass`; not `Passed`, `Bypass`
 # ALL-CAPS glued to a prefix: PGPASSWORD, VAULTTOKEN, MYSQLPASSWORD (not PWD: OLDPWD / PWD are directories)
-_SIR_BIG = r"(?-i:(?<=[A-Z0-9])(?:PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|PASSPHRASE))"
+_SECRET_UPPER = r"(?-i:(?<=[A-Z0-9])(?:PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|PASSPHRASE))"
 # A suffix after the keyword starts with a separator, a digit or an upper-case letter: `aws_secret_access_key`, `SECRET_KEY`,
 # `secretKey`, `Password1`, `passwordConfirm`. `tokens`, `secretary`, `tokenizer` have none, so they are not keys.
-# A suffix whose last segment names metadata (`_min_length`, `_expiry`, `-name`, `SecretRef`) is dropped in _is_sir_key.
-_SIR_SUFFIX = r"(?:(?-i:[_.\-A-Z0-9])[\w.\-]{0,40})?"
-_SIR_KEY_TAM = (r"(?:(?:(?<![^\W_])(?:" + _SIR_KEY + r")|" + _SIR_DEVE + r"|" + _SIR_BIG + r")" + _SIR_SUFFIX
+# A suffix whose last segment names metadata (`_min_length`, `_expiry`, `-name`, `SecretRef`) is dropped in _is_secret_key.
+_SECRET_SUFFIX = r"(?:(?-i:[_.\-A-Z0-9])[\w.\-]{0,40})?"
+_SECRET_KEY_FULL = (r"(?:(?:(?<![^\W_])(?:" + _SECRET_KEY + r")|" + _SECRET_CAMEL + r"|" + _SECRET_UPPER + r")" + _SECRET_SUFFIX
                 + r"|(?<!\w)pass)")
-SIR_SUFFIX_OUTSIDE = frozenset(
+SECRET_SUFFIX_EXCLUDED = frozenset(
     "length len min max count size limit expiry expires expiration exp ttl timeout age lifetime type kind name names ref refs "
     "file path dir url uri endpoint host port header field fields policy rule rules enabled enable disabled required prompt "
     "hint label title env var vars source mode format prefix suffix version provider store manager strategy scheme method "
     "algorithm algo regex pattern template placeholder reset changed date time at created updated expired valid validity "
     "location loc set exists through".split())
-RE_SIR_SEGMENT = re.compile(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])")
-RE_SIR_STRONG = re.compile(r"(?i)passw|passphrase|secret|sifre|şifre|parola|key")
+RE_SECRET_SEGMENT = re.compile(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])")
+# Turkish locale data: the Turkish words in this key pattern (sifre, parola) are matching input (the masker reads Turkish tool output), not untranslated prose.
+RE_SECRET_STRONG = re.compile(r"(?i)passw|passphrase|secret|sifre|şifre|parola|key")
 
 
-def _is_sir_key(k):
+def _is_secret_key(k):
     """Is the matched key a credential key? False when its last segment names metadata (`password_min_length`, `token_type`)."""
-    seg = RE_SIR_SEGMENT.findall(k)
-    return not (len(seg) > 1 and seg[-1].lower() in SIR_SUFFIX_OUTSIDE)
+    seg = RE_SECRET_SEGMENT.findall(k)
+    return not (len(seg) > 1 and seg[-1].lower() in SECRET_SUFFIX_EXCLUDED)
 
 
-def _skip_sir_value(k, v):
+def _skip_secret_value(k, v):
     """Values that are not secrets for this key: a short number under a weak key (`pass=1234`, `token=4096`; `password=1234`
     and six digits or more are still masked) and a directory under PWD (`PWD=/home/emre`)."""
-    if v.isdigit() and len(v) < 6 and not RE_SIR_STRONG.search(k):
+    if v.isdigit() and len(v) < 6 and not RE_SECRET_STRONG.search(k):
         return True
     return k.lower().endswith("pwd") and (v[:1] in "/~" or re.match(r"[A-Za-z]:\\", v) is not None)
 
 
-RE_SIR_KV = re.compile(
-    r"(?P<pre>(?P<k>" + _SIR_KEY_TAM + r")(?:\\?[\"'])?[ \t]*(?:=>|:=|[:=])[ \t]*)"
+RE_SECRET_KV = re.compile(
+    r"(?P<pre>(?P<k>" + _SECRET_KEY_FULL + r")(?:\\?[\"'])?[ \t]*(?:=>|:=|[:=])[ \t]*)"
     r"(?:(?P<sch>(?:Bearer|Basic)[ \t]+)(?=[^\s\"']))?"
     # unquoted: up to a comma / semicolon; but a head shorter than 4 characters runs on over commas (`password=Ab1,xyz9Q`)
     # C# verbatim `Password=""v"";` (e3) and an escaped single quote `Password=\'v\'` (e4) come before the plain quoted forms, which would read `""` as an empty value
@@ -363,40 +367,40 @@ RE_SIR_KV = re.compile(
 # Code that passes the name and the value as two string literals: `headers.Add("X-API-Key", "v")`, `AddWithValue("@password", "v")`,
 # `new AuthenticationHeaderValue("Bearer", "v")`, `headers["X-API-Key"] = "v"`, `new NetworkCredential("user", "v")`.
 # A literal is `"v"`, `$"v"`, `@"v""w"` (verbatim) or `'v'`; a value written as an expression (a variable, `"Bearer " + t`) has no literal to mask.
-_SIR_LIT = (r"(?:(?:@\$?|\$@)\"(?P<vb>(?:[^\"\r\n]|\"\")*)\"|\$?\"(?P<d>(?:[^\"\\\r\n]|\\.)*)\"|'(?P<s>(?:[^'\\\r\n]|\\.)*)')")
-_SIR_TITLE = r"[\w.\-]{1,40}-(?:key|token|secret|auth|password|passwd|pwd)"  # X-Api-Key, Ocp-Apim-Subscription-Key, X-Auth-Token
-RE_SIR_KOD = re.compile(
-    r"(?P<pre>(?:\([ \t]*|\[[ \t]*)(?P<q>[\"'])(?P<k>@?[\w.\-:]{0,40}?(?:" + _SIR_KEY_TAM + r")|" + _SIR_TITLE + r"|Bearer|Basic)(?P=q)"
-    r"[ \t]*(?:(?<=[\"'])(?:,\s{0,60})|\][ \t]*=(?!=)[ \t]*))" + _SIR_LIT, re.I)
-RE_SIR_CODE_IDENTITY = re.compile(
+_SECRET_LIT = (r"(?:(?:@\$?|\$@)\"(?P<vb>(?:[^\"\r\n]|\"\")*)\"|\$?\"(?P<d>(?:[^\"\\\r\n]|\\.)*)\"|'(?P<s>(?:[^'\\\r\n]|\\.)*)')")
+_SECRET_TITLE = r"[\w.\-]{1,40}-(?:key|token|secret|auth|password|passwd|pwd)"  # X-Api-Key, Ocp-Apim-Subscription-Key, X-Auth-Token
+RE_SECRET_CODE = re.compile(
+    r"(?P<pre>(?:\([ \t]*|\[[ \t]*)(?P<q>[\"'])(?P<k>@?[\w.\-:]{0,40}?(?:" + _SECRET_KEY_FULL + r")|" + _SECRET_TITLE + r"|Bearer|Basic)(?P=q)"
+    r"[ \t]*(?:(?<=[\"'])(?:,\s{0,60})|\][ \t]*=(?!=)[ \t]*))" + _SECRET_LIT, re.I)
+RE_SECRET_CODE_IDENTITY = re.compile(
     r"(?P<pre>\b(?:NetworkCredential|UsernamePasswordCredentials|SetBasicAuth|setBasicAuth)[ \t]*\([ \t]*"
-    r"(?:@\$?|\$@|\$)?\"(?:[^\"\\\r\n]|\\.)*\"[ \t]*,\s{0,60})" + _SIR_LIT)
-# A bare `Bearer <opaque token>` (20+ characters with a digit) anywhere in text; the `Authorization:` form is RE_SIR_AUTH's job.
-RE_SIR_TITLE_FULL = re.compile(_SIR_TITLE, re.I)
-RE_SIR_SCHEMA = re.compile(r"(?:Bearer|Basic|Token|Digest)[ \t]+", re.I)
-RE_SIR_INTERPOLATE = re.compile(r"\{[^{}]*\}")  # `$"Bearer {token}"`: an interpolated variable, not a literal secret
-RE_SIR_BEARER = re.compile(r"(?<=[Bb]earer )(?=[\w\-.~+/]{20})(?=[\w\-.~+/]*\d)[\w\-.~+/]+=*")
+    r"(?:@\$?|\$@|\$)?\"(?:[^\"\\\r\n]|\\.)*\"[ \t]*,\s{0,60})" + _SECRET_LIT)
+# A bare `Bearer <opaque token>` (20+ characters with a digit) anywhere in text; the `Authorization:` form is RE_SECRET_AUTH's job.
+RE_SECRET_TITLE_FULL = re.compile(_SECRET_TITLE, re.I)
+RE_SECRET_SCHEMA = re.compile(r"(?:Bearer|Basic|Token|Digest)[ \t]+", re.I)
+RE_SECRET_INTERPOLATE = re.compile(r"\{[^{}]*\}")  # `$"Bearer {token}"`: an interpolated variable, not a literal secret
+RE_SECRET_BEARER = re.compile(r"(?<=[Bb]earer )(?=[\w\-.~+/]{20})(?=[\w\-.~+/]*\d)[\w\-.~+/]+=*")
 # URL userinfo: scheme://user:PASSWORD@host (the password may contain `@`: it ends at the last `@` before the host)
-RE_SIR_URL = re.compile(
+RE_SECRET_URL = re.compile(
     r"(?P<pre>(?<![A-Za-z0-9+.\-])[A-Za-z][A-Za-z0-9+.\-]{1,20}://[^\s/:@\"'<>?#]{0,100}:)(?P<w>[^\s/\"'<>]{1,200})(?=@[^\s@/\"'<>]+)")
 # XML: <password>v</password>, <add key="Password" value="v"/>, <setting name="Password"><value>v</value></setting>,
 # <entry key="password">v</entry>. Every repeat is bounded.
-_XML_ATTR_KEY = (r"\b(?:key|name)\s{0,20}=\s{0,20}(?:\"[\w.\-:]{0,40}?" + _SIR_KEY_TAM + r"\"|'[\w.\-:]{0,40}?" + _SIR_KEY_TAM + r"')")
-RE_SIR_XML = (
-    re.compile(r"(?P<pre><[\w.\-:]{0,40}?" + _SIR_KEY_TAM + r"\s{0,20}>)(?P<v>[^<>]{4,})(?=</)", re.I),
+_XML_ATTR_KEY = (r"\b(?:key|name)\s{0,20}=\s{0,20}(?:\"[\w.\-:]{0,40}?" + _SECRET_KEY_FULL + r"\"|'[\w.\-:]{0,40}?" + _SECRET_KEY_FULL + r"')")
+RE_SECRET_XML = (
+    re.compile(r"(?P<pre><[\w.\-:]{0,40}?" + _SECRET_KEY_FULL + r"\s{0,20}>)(?P<v>[^<>]{4,})(?=</)", re.I),
     re.compile(r"(?P<pre>" + _XML_ATTR_KEY + r"\s{1,20}value\s{0,20}=\s{0,20})(?:\"(?P<v>[^\"<>]*)\"|'(?P<v2>[^'<>]*)')", re.I),
     re.compile(r"(?P<pre>" + _XML_ATTR_KEY + r"[^<>]{0,60}>(?:\s{0,20}<value>)?)(?P<v>[^<>]{4,})(?=</)", re.I),
 )
 # YAML: the value on the line after `key:` (indented). Not a nested key (`name: x`, `secretKeyRef:`), not a comment, not a list item.
-RE_SIR_YAML = re.compile(
-    r"(?P<pre>(?P<k>" + _SIR_KEY_TAM + r")(?:\\?[\"'])?[ \t]*:[ \t]*\r?\n[ \t]+(?![ \t]))"
+RE_SECRET_YAML = re.compile(
+    r"(?P<pre>(?P<k>" + _SECRET_KEY_FULL + r")(?:\\?[\"'])?[ \t]*:[ \t]*\r?\n[ \t]+(?![ \t]))"
     r"(?P<v>(?![#\r\n]|-[ \t]|[^\r\n]*?:(?:[ \t\r\n]|\Z))[^\r\n]+)", re.I)
 # a JSON key written with unicode escapes is decoded before matching (only credential-like keys are rewritten)
 RE_ESC_KEY = re.compile(r'"((?:[^"\\\n]|\\.){1,120})"(?=[ \t]*:)')
 RE_UESC = re.compile(r"\\u([0-9a-fA-F]{4})")
 # Well-known token shapes. One pattern per shape, each run only when its literal marker is in the text (a single alternation of
 # all shapes cannot use the engine's literal-prefix scan and costs a full pass per alternative).
-_SIR_SHAPES = (
+_SECRET_SHAPES = (
     (("BEGIN", "begin"), r"(?i:-{4,5}BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-{4,5}.*?(?:-{4,5}END [A-Z ]*PRIVATE KEY(?: BLOCK)?-{4,5}|\Z))"),
     (("hvs.", "hvb."), r"(?<![\w])hv[sb]\.[A-Za-z0-9_\-]{20,}"),
     (("gh", "github_pat_"), r"(?<![\w])gh[pousr]_[A-Za-z0-9]{20,}|(?<![\w])github_pat_[A-Za-z0-9_]{20,}"),
@@ -409,90 +413,92 @@ _SIR_SHAPES = (
     (("AIza",), r"(?<![\w\-])AIza[\w\-]{30,40}"),
     (("k_live_", "k_test_"), r"(?<![\w\-])[sr]k_(?:live|test)_[A-Za-z0-9]{16,}"),
     (("npm_",), r"(?<![\w\-])npm_[A-Za-z0-9]{30,}"),
-    (("earer ",), RE_SIR_BEARER.pattern),
+    (("earer ",), RE_SECRET_BEARER.pattern),
     (("hooks.slack.com",), r"https://hooks\.slack\.com/(?:services|workflows|triggers)/[\w/\-]{20,}"),
     (("Private-Lines:",), r"Private-Lines:.*?(?:Private-MAC:[^\r\n]*|\Z)"),  # PuTTY .ppk private part
 )
-RE_SIR_SHAPE = tuple((marker, re.compile(pattern, re.S)) for marker, pattern in _SIR_SHAPES)
-RE_SIR_PRECHECK = re.compile(
+RE_SECRET_SHAPE = tuple((marker, re.compile(pattern, re.S)) for marker, pattern in _SECRET_SHAPES)
+# Turkish locale data: the Turkish words in this precheck pattern (sifre, parola, anahtar) are matching input (the masker reads Turkish tool output), not untranslated prose.
+RE_SECRET_PRECHECK = re.compile(
     r"(?i)pass|pwd|secret|token|api.?key|authorization|private|sifre|şifre|parola|anahtar|hv[sb]\.|gh[pousr]_|github_pat_|cfut_|AKIA|xox[abprs]-"
     r"|key|cookie|eyJ|sk-|glpat-|AIza|_live_|_test_|npm_|ASIA|hooks\.slack|--user|-u[ \t=]|-U[ \t]|[?&]sig=|signature|x-amz-|x-goog-|machine")
 # Authorization header / field with ANY scheme (`Token`, `Digest ...`, `AWS4-HMAC-SHA256 Credential=..., Signature=...`, none):
 # everything after the scheme up to the end of the line or the closing quote is the secret.
-RE_SIR_AUTH = re.compile(
+RE_SECRET_AUTH = re.compile(
     r"(?P<pre>(?<![\w\-])(?:proxy-)?authorization\\?[\"']?[ \t]*[:=][ \t]*(?P<q>\\?[\"'])?(?:[A-Za-z][\w\-]{0,30}[ \t]+(?=[^\s\"'\\]))?)"
     r"(?P<v>[^\s\"'\\](?(q)[^\r\n\"'\\]{0,4000}|[^\r\n]{0,4000}))", re.I)  # quoted: up to the quote, else the whole line
 # Cookie / Set-Cookie header values (`Cookie: a=v; b=w`: every value; `Set-Cookie: s=v; Path=/`: the first pair only)
-RE_SIR_COOKIE = re.compile(r"(?P<pre>(?<![\w\-])(?P<set>set-)?cookie[\"']?[ \t]*:[ \t]*[\"']?)(?P<v>[^\r\n\"']{1,8000})", re.I)
+RE_SECRET_COOKIE = re.compile(r"(?P<pre>(?<![\w\-])(?P<set>set-)?cookie[\"']?[ \t]*:[ \t]*[\"']?)(?P<v>[^\r\n\"']{1,8000})", re.I)
 RE_COOKIE_DOUBLE = re.compile(r"(?P<a>[ \t]*[^=;\s]{1,200}=)(?P<v>[^;]*)")
 # curl / wget style user:password (`-u user:pw`, `--user=user:pw`, `--proxy-user`)
-RE_SIR_CURL = re.compile(r"(?P<pre>(?<![\w\-])(?:-u|-U|--user|--proxy-user)(?:[ \t]+|=)[\"']?[^\s:\"']{1,100}:)(?P<v>[^\s\"']{1,200})")
+RE_SECRET_CURL = re.compile(r"(?P<pre>(?<![\w\-])(?:-u|-U|--user|--proxy-user)(?:[ \t]+|=)[\"']?[^\s:\"']{1,100}:)(?P<v>[^\s\"']{1,200})")
 # URL userinfo without a password: https://<token>@host (only token-like: 12+ characters with letters and digits)
-RE_SIR_URL_TOKEN = re.compile(
+RE_SECRET_URL_TOKEN = re.compile(
     r"(?P<pre>(?<![A-Za-z0-9+.\-])[A-Za-z][A-Za-z0-9+.\-]{1,20}://)(?P<w>[A-Za-z0-9_\-.~%]{12,200})(?=@[^\s@/\"'<>]+)")
 # signed-URL / API query parameters
-RE_SIR_QUERY = re.compile(
+RE_SECRET_QUERY = re.compile(
     r"(?P<pre>[?&](?:key|sig|signature|x-amz-signature|x-amz-security-token|x-amz-credential|x-goog-signature|x-goog-credential"
     r"|access_key|accesskey|apikey|api_key|auth|token|secret|password)=)(?P<v>[^&#\s\"'<>]{4,2000})", re.I)
 # name / value pairs: k8s env (`- name: DB_PASSWORD` + `value: x`), JSON {"name": "DB_PASSWORD", "value": "x"} (either order),
 # {"key": "password", "value": ...}
-_SIR_AD = r"[\w.\-]{0,40}?" + _SIR_KEY_TAM
-RE_SIR_K8S = re.compile(
-    r"(?P<pre>(?<![\w\-])name:[ \t]*[\"']?(?P<k>" + _SIR_AD + r")[\"']?[ \t]*\r?\n[ \t]*(?:-[ \t]+)?value:[ \t]*)"
+_SECRET_NAME = r"[\w.\-]{0,40}?" + _SECRET_KEY_FULL
+RE_SECRET_K8S = re.compile(
+    r"(?P<pre>(?<![\w\-])name:[ \t]*[\"']?(?P<k>" + _SECRET_NAME + r")[\"']?[ \t]*\r?\n[ \t]*(?:-[ \t]+)?value:[ \t]*)"
     r"(?:\"(?P<d>[^\"\r\n]*)\"|'(?P<s>[^'\r\n]*)'|(?P<u>[^\s#][^\r\n]*))", re.I)
 _JSON_VALUE = r"(?:\"(?P<d>(?:[^\"\\\n]|\\.)*)\"|(?P<u>-?\d[\d.]*))"
-RE_SIR_NV = re.compile(
-    r"(?P<pre>\"(?:name|key)\"\s{0,20}:\s{0,20}\"(?P<k>" + _SIR_AD + r")\"\s{0,20},\s{0,40}\"value\"\s{0,20}:\s{0,20})" + _JSON_VALUE, re.I)
-RE_SIR_VN = re.compile(
+RE_SECRET_NV = re.compile(
+    r"(?P<pre>\"(?:name|key)\"\s{0,20}:\s{0,20}\"(?P<k>" + _SECRET_NAME + r")\"\s{0,20},\s{0,40}\"value\"\s{0,20}:\s{0,20})" + _JSON_VALUE, re.I)
+RE_SECRET_VN = re.compile(
     r"(?P<pre>\"value\"\s{0,20}:\s{0,20})" + _JSON_VALUE
-    + r"(?=\s{0,20},\s{0,40}\"(?:name|key)\"\s{0,20}:\s{0,20}\"(?P<k>" + _SIR_AD + r")\")", re.I)
+    + r"(?=\s{0,20},\s{0,40}\"(?:name|key)\"\s{0,20}:\s{0,20}\"(?P<k>" + _SECRET_NAME + r")\")", re.I)
 # one key and one value on a line: `vault kv get` (`password    x`), psql \x (`password | x`). The value is one cell: no `|`,
 # no run of two blanks (`kubectl get secrets` rows have more columns).
-RE_SIR_LINE = re.compile(
-    r"(?P<pre>^[ \t]*(?=[A-Za-z])(?P<k>" + _SIR_AD + r")(?:[ \t]*\|[ \t]*|[ \t]{2,}))"
+RE_SECRET_LINE = re.compile(
+    r"(?P<pre>^[ \t]*(?=[A-Za-z])(?P<k>" + _SECRET_NAME + r")(?:[ \t]*\|[ \t]*|[ \t]{2,}))"
     r"(?P<u>[^\s|](?:[^\s|]|[ \t](?![ \t]))*)(?=[ \t]*\r?$)", re.I | re.M)
 # .netrc: machine <host> login <user> password <pw> (one line or several)
-RE_SIR_NETRC = re.compile(
+RE_SECRET_NETRC = re.compile(
     r"(?P<pre>(?:\bmachine[ \t]+\S+|\bdefault)(?:\s+(?:login|account|port)[ \t]+\S+){0,3}\s+password[ \t]+)(?P<u>\S+)")
 # psql / mysql result tables: a header row with a credential column, a ----+---- rule, then the rows
 RE_TABLE_RULE = re.compile(r"[ \t]*\+?-{2,}(?:\+-{2,})+\+?[ \t]*\r?")
-RE_SIR_COLUMN = re.compile(r"[ \t]*(?P<k>" + _SIR_AD + r")[ \t]*", re.I)
+RE_SECRET_COLUMN = re.compile(r"[ \t]*(?P<k>" + _SECRET_NAME + r")[ \t]*", re.I)
 # The same markers as plain substrings of the lower-cased text: the credential pass runs only when one is present. A substring
 # search per marker is far cheaper than one big case-insensitive alternation over megabytes of clean log.
-SIR_MARKERS = tuple(
+# Turkish locale data: the Turkish words in the marker list below (sifre, parola, anahtar) are matching input (the masker reads Turkish tool output), not untranslated prose.
+SECRET_MARKERS = tuple(
     "pass pwd secret token key authorization private sifre şifre parola anahtar hvs. hvb. ghp_ gho_ ghu_ ghs_ ghr_ github_pat_ "
     "cfut_ akia asia xox cookie eyj sk- glpat- aiza _live_ _test_ npm_ hooks.slack --user -u -U sig= signature x-amz- x-goog- "
     "machine begin private-lines bearer credential basicauth".lower().split())
 
 
-def _sir_candidate(t):
+def _secret_candidate(t):
     tl = t.lower()
-    return any(x in tl for x in SIR_MARKERS)
+    return any(x in tl for x in SECRET_MARKERS)
 
 
-SIR_VALUE_OUTSIDE = frozenset(("null", "true", "false", "none", "nil", "undefined", "required", "optional", "string", "empty",
+SECRET_VALUE_EXCLUDED = frozenset(("null", "true", "false", "none", "nil", "undefined", "required", "optional", "string", "empty",
                             "redacted", "hidden", "masked"))
 
 
 # A value is skipped ONLY when the WHOLE value is clearly a placeholder. Real passwords start with `$`, `!`, `%`, `<` or look like
 # code (`Admin(2026)`, `a.b.c`), so neither the first character nor a code shape is a reason to skip.
-_SIR_SEG = r"[A-Z]+[0-9]{0,2}"  # a name segment: letters, at most two digits (`S3`, `OAUTH2`); `ADMIN2026` looks like a password
-_SIR_AD = _SIR_SEG + r"(?:_[A-Z0-9]{1,12})*"
-SIR_PLACE_HOLDER = re.compile(
+_SECRET_SEG = r"[A-Z]+[0-9]{0,2}"  # a name segment: letters, at most two digits (`S3`, `OAUTH2`); `ADMIN2026` looks like a password
+_SECRET_VAR_NAME = _SECRET_SEG + r"(?:_[A-Z0-9]{1,12})*"
+SECRET_PLACEHOLDER = re.compile(
     r"\$\{[A-Za-z_][\w.\-]*\}"  # ${DB_PASS}, ${secrets.pw}
-    r"|\$" + _SIR_AD + r"|\$\(" + _SIR_AD + r"\)"  # $DB_PASS, $(DB_PASS): upper-case names; `$ADMIN2026`, `$ecretPass1` are passwords
+    r"|\$" + _SECRET_VAR_NAME + r"|\$\(" + _SECRET_VAR_NAME + r"\)"  # $DB_PASS, $(DB_PASS): upper-case names; `$ADMIN2026`, `$ecretPass1` are passwords
     r"|<(?:[a-z]+(?:[ _.\-][a-z0-9]+)*|[A-Z]+(?:[ _.\-][A-Z0-9]+)*)>"  # <your-password>, <DB_PASS>; `<Secret123>` is a password
-    r"|%(?:" + _SIR_AD + r"|[a-z]+(?:_[a-z0-9]+)*)%"  # %DB_PASS%, %appdata%; `%Pass9%` is a password
+    r"|%(?:" + _SECRET_VAR_NAME + r"|[a-z]+(?:_[a-z0-9]+)*)%"  # %DB_PASS%, %appdata%; `%Pass9%` is a password
     r"|\{\{[^{}]*\}\}"  # {{ secrets.pw }}
-    r"|\[KEY:masked\]|\[[A-Z]+:[0-9a-f]{6,8}\]"  # already masked ([SIR:xxxxxx], [TEL:xxxxxx] ...; 6 hex from older versions, 8 now)
+    r"|\[KEY:masked\]|\[[A-Z]+:[0-9a-f]{6,8}\]"  # already masked ([SECRET:xxxxxx], [PHONE:xxxxxx] ...; 6 hex from older versions, 8 now)
     r"|[*\u2022xX.#\-_]+")  # ****, xxxx
 
 
-def _skip_sir(v):
-    return len(v) < 4 or v.lower() in SIR_VALUE_OUTSIDE or SIR_PLACE_HOLDER.fullmatch(v) is not None
+def _skip_secret(v):
+    return len(v) < 4 or v.lower() in SECRET_VALUE_EXCLUDED or SECRET_PLACEHOLDER.fullmatch(v) is not None
 
 
-def _sir_closing(v):
+def _secret_closing(v):
     """Split trailing closing brackets that do not belong to the value off the value (`(password=hunter22)`, `{"x": password=...}`);
     brackets that close an opener inside the value (`Admin(2026)`) stay in it. One pass: the counts are taken once and
     decremented while closers are removed (the old version recounted for every bracket, quadratic on `password=a` + ")))...")."""
@@ -509,59 +515,59 @@ def _sir_closing(v):
     return v[:k], v[k:]
 
 
-RE_SIR_LINE_HEAD = re.compile(r"[ \t]*(?:[#;\-*]|//)?[ \t]*(?:(?:export|set|setx)[ \t]+)?[\w.\-]*")
-RE_SIR_ADJACENT = re.compile(r"\S+?(?:=>|:=|[:=])[ \t]*")
+RE_SECRET_LINE_HEAD = re.compile(r"[ \t]*(?:[#;\-*]|//)?[ \t]*(?:(?:export|set|setx)[ \t]+)?[\w.\-]*")
+RE_SECRET_ADJACENT = re.compile(r"\S+?(?:=>|:=|[:=])[ \t]*")
 
 
-def _sir_line_end(m):
+def _secret_line_end(m):
     """The rest of the line after an unquoted value (with the value's own text), or "" . An assignment at the start of a line
     (`SmtpPassword=Ab9 xY 12`, `password: a b c`, `export PW=..`) with no blank before the `=` / `:` owns the whole rest of the
     line when the value stops at a blank: the secret may contain both, and the old rule left the tail as a readable
     fragment. A value that stops at `;` or a quote (connection string, code) and code-style `password = expr` (blanks around
     `=`) keep the short rule."""
     t, e = m.string, m.end("u")
-    if e >= len(t) or t[e] not in " \t" or not RE_SIR_STRONG.search(m.group("k")):
+    if e >= len(t) or t[e] not in " \t" or not RE_SECRET_STRONG.search(m.group("k")):
         return ""  # only a blank ends the value (a comma run-on keeps the old rule) and only a strong key (`Pass: 1234 Failed: 0` is a test summary)
     ls = t.rfind("\n", 0, m.start()) + 1
-    if not RE_SIR_LINE_HEAD.fullmatch(t, ls, m.start("k")):
+    if not RE_SECRET_LINE_HEAD.fullmatch(t, ls, m.start("k")):
         return ""
-    if not RE_SIR_ADJACENT.fullmatch(m.group("pre"), m.start("k") - m.start()):
+    if not RE_SECRET_ADJACENT.fullmatch(m.group("pre"), m.start("k") - m.start()):
         return ""
     le = t.find("\n", e)
     return t[e:le if le >= 0 else len(t)].rstrip("\r")
 
 
-def _mask_out_sir(t, say):
+def _mask_out_secret(t, say):
     def shape(m):
-        say["SIR"] += 1
-        return _token("SIR", m.group(0))
+        say["SECRET"] += 1
+        return _token("SECRET", m.group(0))
 
     kv_end_at = [0]
 
     def kv(m):
         k = m.group("k")
-        if not _is_sir_key(k) or "uthorization" in k or "UTHORIZATION" in k:
-            return m.group(0)  # metadata key; an Authorization value is RE_SIR_AUTH's job
+        if not _is_secret_key(k) or "uthorization" in k or "UTHORIZATION" in k:
+            return m.group(0)  # metadata key; an Authorization value is RE_SECRET_AUTH's job
         g = next((x for x in ("d", "s", "e", "e3", "e4", "e5", "u") if m.group(x) is not None), None)
         v = m.group(g)
         last = ""
         if g == "u":
             ek = ""
-            if not (v.lower() in SIR_VALUE_OUTSIDE or SIR_PLACE_HOLDER.fullmatch(v) or _skip_sir_value(k, v)):
-                ek = _sir_line_end(m)
-                if ek and SIR_PLACE_HOLDER.fullmatch((v + ek).rstrip()):
+            if not (v.lower() in SECRET_VALUE_EXCLUDED or SECRET_PLACEHOLDER.fullmatch(v) or _skip_secret_value(k, v)):
+                ek = _secret_line_end(m)
+                if ek and SECRET_PLACEHOLDER.fullmatch((v + ek).rstrip()):
                     ek = ""  # the whole line is a placeholder with blanks (`{{ secrets.pw }}`, `<db password>`)
             if ek:
                 v, last = v + ek.rstrip(), ek[len(ek.rstrip()):]
                 kv_end_at[0] = m.end("u") + len(ek)  # the match ends before the tail: the caller skips the text up to here
             else:
-                if _skip_sir(v):
+                if _skip_secret(v):
                     return m.group(0)
-                v, last = _sir_closing(v)
-        if _skip_sir(v) or _skip_sir_value(k, v):
+                v, last = _secret_closing(v)
+        if _skip_secret(v) or _skip_secret_value(k, v):
             return m.group(0)
-        say["SIR"] += 1
-        tok = _token("SIR", v)
+        say["SECRET"] += 1
+        tok = _token("SECRET", v)
         if g == "u":
             return m.group("pre") + (m.group("sch") or "") + tok + last
         a, b = m.start(g), m.end(g)
@@ -573,18 +579,18 @@ def _mask_out_sir(t, say):
             v = m.group(g)
             if v is None:
                 return m.group(0)
-            if g == "v" and m.re is RE_SIR_YAML:
-                if not _is_sir_key(m.group("k")):
+            if g == "v" and m.re is RE_SECRET_YAML:
+                if not _is_secret_key(m.group("k")):
                     return m.group(0)
                 c = re.search(r"[ \t]#", v)
                 if c:
                     v = v[:c.start()]
             ic = v.strip()
-            if _skip_sir(ic) or (m.re is RE_SIR_CURL and _skip_sir_value("", ic)):
+            if _skip_secret(ic) or (m.re is RE_SECRET_CURL and _skip_secret_value("", ic)):
                 return m.group(0)
             ba = m.start(g) - m.start() + (len(v) - len(v.lstrip()))
-            say["SIR"] += 1
-            return m.group(0)[:ba] + _token("SIR", ic) + m.group(0)[ba + len(ic):]
+            say["SECRET"] += 1
+            return m.group(0)[:ba] + _token("SECRET", ic) + m.group(0)[ba + len(ic):]
         return f
 
     def value(m):
@@ -593,101 +599,101 @@ def _mask_out_sir(t, say):
             k = m.group("k")
         except IndexError:
             k = None
-        if k is not None and not _is_sir_key(k):
+        if k is not None and not _is_secret_key(k):
             return m.group(0)
         g = next((x for x in ("d", "s", "u") if x in m.re.groupindex and m.group(x) is not None), None)
         if g is None:
             return m.group(0)
         v = m.group(g).rstrip()
-        if _skip_sir(v) or _skip_sir_value(k or "", v):
+        if _skip_secret(v) or _skip_secret_value(k or "", v):
             return m.group(0)
-        say["SIR"] += 1
+        say["SECRET"] += 1
         a = m.start(g) - m.start()
-        return m.group(0)[:a] + _token("SIR", v) + m.group(0)[a + len(v):]
+        return m.group(0)[:a] + _token("SECRET", v) + m.group(0)[a + len(v):]
 
     def auth(m):
         v = m.group("v").rstrip()
-        if _skip_sir(v):
+        if _skip_secret(v):
             return m.group(0)
-        say["SIR"] += 1
-        return m.group("pre") + _token("SIR", v) + m.group(0)[len(m.group("pre")) + len(v):]
+        say["SECRET"] += 1
+        return m.group("pre") + _token("SECRET", v) + m.group(0)[len(m.group("pre")) + len(v):]
 
     def code(m):
         """Value literal of a code pair (`Add("X-API-Key", "v")`, `NetworkCredential("u", "v")`); a scheme word (`Bearer `) stays."""
         k = m.groupdict().get("k")
-        if k is not None and k.lower() not in ("bearer", "basic") and not RE_SIR_TITLE_FULL.fullmatch(k) and not _is_sir_key(k):
+        if k is not None and k.lower() not in ("bearer", "basic") and not RE_SECRET_TITLE_FULL.fullmatch(k) and not _is_secret_key(k):
             return m.group(0)
         g = next((x for x in ("vb", "d", "s") if m.group(x) is not None), None)
         if g is None:
             return m.group(0)
         v = m.group(g)
-        sch = RE_SIR_SCHEMA.match(v)
+        sch = RE_SECRET_SCHEMA.match(v)
         off = sch.end() if sch else 0
         v2 = v[off:]
-        if (_skip_sir(v2) or _skip_sir_value(k or "", v2) or v2.lower() in ("bearer", "basic", "token", "digest")
-                or RE_SIR_INTERPOLATE.fullmatch(v2)):
+        if (_skip_secret(v2) or _skip_secret_value(k or "", v2) or v2.lower() in ("bearer", "basic", "token", "digest")
+                or RE_SECRET_INTERPOLATE.fullmatch(v2)):
             return m.group(0)
-        say["SIR"] += 1
+        say["SECRET"] += 1
         a = m.start(g) - m.start() + off
-        return m.group(0)[:a] + _token("SIR", v2) + m.group(0)[a + len(v2):]
+        return m.group(0)[:a] + _token("SECRET", v2) + m.group(0)[a + len(v2):]
 
     def cookie(m):
         first = [True]
 
         def double(c):
             v = c.group("v").strip()
-            if not (first[0] or not m.group("set")) or _skip_sir(v):
+            if not (first[0] or not m.group("set")) or _skip_secret(v):
                 first[0] = False
                 return c.group(0)
             first[0] = False
-            say["SIR"] += 1
-            return c.group("a") + c.group("v").replace(v, _token("SIR", v), 1)
+            say["SECRET"] += 1
+            return c.group("a") + c.group("v").replace(v, _token("SECRET", v), 1)
         return m.group("pre") + RE_COOKIE_DOUBLE.sub(double, m.group("v"))
 
     def url_token(m):
         w = m.group("w")
-        if not (re.search(r"\d", w) and re.search(r"[A-Za-z]", w)) or _skip_sir(w):
+        if not (re.search(r"\d", w) and re.search(r"[A-Za-z]", w)) or _skip_secret(w):
             return m.group(0)
-        say["SIR"] += 1
-        return m.group("pre") + _token("SIR", w)
+        say["SECRET"] += 1
+        return m.group("pre") + _token("SECRET", w)
 
     if "\\u" in t:
         t = _resolve_key(t)
     url = "://" in t and "@" in t
-    if not (url or _sir_candidate(t)):
+    if not (url or _secret_candidate(t)):
         return t
-    for marker, pattern in RE_SIR_SHAPE:
+    for marker, pattern in RE_SECRET_SHAPE:
         if any(x in t for x in marker):
             t = pattern.sub(shape, t)
     if url:
-        t = RE_SIR_URL.sub(group("w"), t)
-        t = RE_SIR_URL_TOKEN.sub(url_token, t)
+        t = RE_SECRET_URL.sub(group("w"), t)
+        t = RE_SECRET_URL_TOKEN.sub(url_token, t)
     if "<" in t:
-        t = RE_SIR_XML[0].sub(group("v"), t)
-        t = RE_SIR_XML[1].sub(group("v"), RE_SIR_XML[1].sub(group("v2"), t))
-        t = RE_SIR_XML[2].sub(group("v"), t)
+        t = RE_SECRET_XML[0].sub(group("v"), t)
+        t = RE_SECRET_XML[1].sub(group("v"), RE_SECRET_XML[1].sub(group("v2"), t))
+        t = RE_SECRET_XML[2].sub(group("v"), t)
     min_ = t.lower()
     if "uthorization" in min_:
-        t = RE_SIR_AUTH.sub(auth, t)
+        t = RE_SECRET_AUTH.sub(auth, t)
     if "cookie" in min_:
-        t = RE_SIR_COOKIE.sub(cookie, t)
+        t = RE_SECRET_COOKIE.sub(cookie, t)
     if "-u" in t or "-U" in t:
-        t = RE_SIR_CURL.sub(group("v"), t)
+        t = RE_SECRET_CURL.sub(group("v"), t)
     if "=" in t and ("?" in t or "&" in t):
-        t = RE_SIR_QUERY.sub(group("v"), t)
+        t = RE_SECRET_QUERY.sub(group("v"), t)
     if "value" in min_:
         if "name" in min_:
-            t = RE_SIR_K8S.sub(value, t)
+            t = RE_SECRET_K8S.sub(value, t)
         if '"' in t:
-            t = RE_SIR_VN.sub(value, RE_SIR_NV.sub(value, t))
+            t = RE_SECRET_VN.sub(value, RE_SECRET_NV.sub(value, t))
     if "machine" in min_ or "default" in min_:
-        t = RE_SIR_NETRC.sub(value, t)
+        t = RE_SECRET_NETRC.sub(value, t)
     if "," in t or "]" in t:
-        t = RE_SIR_KOD.sub(code, t)
+        t = RE_SECRET_CODE.sub(code, t)
     if "redential" in t or "asicAuth" in t:
-        t = RE_SIR_CODE_IDENTITY.sub(code, t)
+        t = RE_SECRET_CODE_IDENTITY.sub(code, t)
     output, son_yer = [], 0
-    for m in RE_SIR_KV.finditer(t):  # like sub(), but kv may consume the rest of the line (see _sir_line_end)
+    for m in RE_SECRET_KV.finditer(t):  # like sub(), but kv may consume the rest of the line (see _secret_line_end)
         if m.start() < son_yer:
             continue
         kv_end_at[0] = 0
@@ -697,8 +703,8 @@ def _mask_out_sir(t, say):
     output.append(t[son_yer:])
     t = "".join(output)
     if ":" in t and "\n" in t:
-        t = RE_SIR_YAML.sub(group("v"), t)
-    t = RE_SIR_LINE.sub(value, t)
+        t = RE_SECRET_YAML.sub(group("v"), t)
+    t = RE_SECRET_LINE.sub(value, t)
     if "|" in t and "--" in t:
         t = _mask_out_table(t, say)
     return t
@@ -716,8 +722,8 @@ def _mask_out_table(t, say):
         title = lines[i - 1].split("|")
         order = []
         for j, h in enumerate(title):
-            mm = RE_SIR_COLUMN.fullmatch(h.rstrip("\r"))
-            if mm and _is_sir_key(mm.group("k")):
+            mm = RE_SECRET_COLUMN.fullmatch(h.rstrip("\r"))
+            if mm and _is_secret_key(mm.group("k")):
                 order.append(j)
         i += 1
         if not order:
@@ -727,9 +733,9 @@ def _mask_out_table(t, say):
             if len(cell) == len(title):
                 for j in order:
                     v = cell[j].strip()
-                    if v and not _skip_sir(v):
-                        say["SIR"] += 1
-                        cell[j] = cell[j].replace(v, _token("SIR", v), 1)
+                    if v and not _skip_secret(v):
+                        say["SECRET"] += 1
+                        cell[j] = cell[j].replace(v, _token("SECRET", v), 1)
                         changed = True
                 lines[i] = "|".join(cell)
             i += 1
@@ -743,26 +749,26 @@ def _resolve_key(t):
         if "\\u" not in k:
             return m.group(0)
         d = RE_UESC.sub(lambda x: chr(int(x.group(1), 16)), k)
-        if not RE_SIR_PRECHECK.search(d) or re.search(r'["\\\x00-\x1f\ud800-\udfff]', d):
+        if not RE_SECRET_PRECHECK.search(d) or re.search(r'["\\\x00-\x1f\ud800-\udfff]', d):
             return m.group(0)
         return '"' + d + '"'
     return RE_ESC_KEY.sub(f, t)
 
 
 # Terminal colour / cursor sequences. An SGR code ends in `m` (a word character), so it hides the boundary in front of a number
-# or a key (`ESC[32m<TCKN>ESC[0m`, `ESC[1mpasswordESC[0m=...`): the text is matched with them removed.
+# or a key (`ESC[32m<TR_ID>ESC[0m`, `ESC[1mpasswordESC[0m=...`): the text is matched with them removed.
 RE_ANSI = re.compile(
     r"\x1b\[[0-?]*[ -/]*[@-~]|\x9b[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b\n]{0,2000}(?:\x07|\x1b\\)?|\x1b[()][0-9A-Za-z]|\x1b[@-Z\\-_]")
 # invisible characters between digits (`1234<ZWSP>5678901`, LRM, NUL, backspace, CR, combining marks): every Unicode Cf / Cc /
 # Mn / Me character except newline and tab is removed there. Blanks and dashes stay: the patterns treat them as separators.
 RE_BETWEEN = re.compile(r"(?<=\d)[^\w\n\t !-~]{1,8}(?=\d)")
 RE_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
-_INVISIBLE_TURN = frozenset(("Cf", "Cc", "Mn", "Me"))
+_INVISIBLE_KIND = frozenset(("Cf", "Cc", "Mn", "Me"))
 
 
 def _drop_between(m):
     g = m.group(0)
-    return "" if all(unicodedata.category(c) in _INVISIBLE_TURN for c in g) else g
+    return "" if all(unicodedata.category(c) in _INVISIBLE_KIND for c in g) else g
 
 
 RE_DIGIT_OTHER = re.compile(r"(?![0-9])\d")  # a decimal digit that is not ASCII (fullwidth, Arabic-Indic, Devanagari ...)
@@ -847,7 +853,7 @@ def _mask_out_key(t, say):
 
 
 # Encoded forms of an identifier: percent (`%40`, `%2B90`), HTML entities (`&#64;`, `&#x40;`, `&commat;`) and `\uXXXX` escapes.
-RE_KOD = re.compile(r"%[0-9A-Fa-f]{2}|&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});|\\u[0-9A-Fa-f]{4}")
+RE_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}|&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});|\\u[0-9A-Fa-f]{4}")
 RE_PERCENT = re.compile(r"(?:%[0-9A-Fa-f]{2})+")
 RE_ASSET = re.compile(r"&(?:#([0-9]{1,7})|#[xX]([0-9A-Fa-f]{1,6})|([A-Za-z][A-Za-z0-9]{1,31}));")
 RE_UESC_CHAIN = re.compile(r"(?:\\u[0-9A-Fa-f]{4})+")
@@ -902,29 +908,29 @@ def _resolve(t):
     return t
 
 
-_HAM = None  # while set (a list), the identifier callbacks record (raw text, token) for every value they mask
+_RAW = None  # while set (a list), the identifier callbacks record (raw text, token) for every value they mask
 RE_TOKEN = re.compile(r"\[([A-Z]+):[0-9a-f]{8}\]")
 
 
 def _record(ham, tok):
-    if _HAM is not None:
-        _HAM.append((ham, tok))
+    if _RAW is not None:
+        _RAW.append((ham, tok))
     return tok
 
 
 def _coded_lines(t, say):
     """A line with an encoded form is decoded in a copy and masked alone; when that finds an identifier, the DECODED line takes
     its place (and is masked with the rest). Lines where decoding reveals nothing stay exactly as they were.
-    Decoding can glue a character onto an identifier the original line had (`&#48;<TCKN>` becomes a 12-digit run): every value
+    Decoding can glue a character onto an identifier the original line had (`&#48;<TR_ID>` becomes a 12-digit run): every value
     the original masking caught whose token is missing from the decoded result is replaced by its token in the decoded line; if
     that raw text is no longer there either, the original line is kept (masked as usual)."""
-    global _HAM
-    if not RE_KOD.search(t):
+    global _RAW
+    if not RE_ESCAPE.search(t):
         return t
     lines = t.splitlines(keepends=True)
     changed = False
     for i, s in enumerate(lines):
-        if not RE_KOD.search(s):
+        if not RE_ESCAPE.search(s):
             continue
         d = _resolve(s)
         if d == s:
@@ -933,11 +939,11 @@ def _coded_lines(t, say):
         if md == d:
             continue
         ham = []
-        _HAM = ham
+        _RAW = ham
         try:
             _mask_out_core(s, collections.Counter())
         finally:
-            _HAM = None
+            _RAW = None
         present = {m.group(0) for m in RE_TOKEN.finditer(md)}
         for h, tok in ham:
             if tok in present:
@@ -962,7 +968,7 @@ def _mask_out_part(t, say):
 
 def _mask_out_core(t, say):
     permission_field, permission_tel = _permissions()
-    t = _mask_out_sir(t, say)
+    t = _mask_out_secret(t, say)
 
     def iban(m):
         s = re.sub(r"[^0-9A-Za-z]", "", m.group(0))
@@ -975,31 +981,31 @@ def _mask_out_core(t, say):
         s = re.sub(r"\D", "", m.group(0))
         if not _card_valid(s) or _id_context(m.string, m.start()):
             return m.group(0)
-        say["KART"] += 1
-        return _record(m.group(0), _token("KART", s))
+        say["CARD"] += 1
+        return _record(m.group(0), _token("CARD", s))
 
     def mail(m):
         a = m.group(0)
         field = a.rsplit("@", 1)[1].lower()
         last = field.rsplit(".", 1)[1]
-        if last in MAIL_SUFFIX_OUTSIDE or any(field == x or field.endswith("." + x) for x in permission_field):
+        if last in EMAIL_SUFFIX_EXCLUDED or any(field == x or field.endswith("." + x) for x in permission_field):
             return a
-        say["EPOSTA"] += 1
-        return _record(a, _token("EPOSTA", a.lower()))
+        say["EMAIL"] += 1
+        return _record(a, _token("EMAIL", a.lower()))
 
-    def tckn(m):
+    def tr_id(m):
         s = m.group(0)
         r = re.sub(r"\D", "", s)
-        if len(r) != 11 or not _tckn_valid(r) or _id_context(m.string, m.start()):
+        if len(r) != 11 or not _tr_id_valid(r) or _id_context(m.string, m.start()):
             return s
-        if _GH_IDENTITY and m.re is RE_TCKN and _gh_location(m.string, m.start(), m.end()):
+        if _GH_IDENTITY and m.re is RE_TR_ID and _gh_location(m.string, m.start(), m.end()):
             return s
-        if m.re is RE_TCKN_GRUP and m.group(1) == "." and all(int(x) <= 255 for x in s.split(".")):
-            return s  # 192.0.2.25: an IPv4 address, not a dotted 3-3-3-2 TCKN
-        say["TCKN"] += 1
-        return _record(s, _token("TCKN", r))
+        if m.re is RE_TR_ID_GROUPED and m.group(1) == "." and all(int(x) <= 255 for x in s.split(".")):
+            return s  # 192.0.2.25: an IPv4 address, not a dotted 3-3-3-2 TR_ID
+        say["TR_ID"] += 1
+        return _record(s, _token("TR_ID", r))
 
-    def tel(sirkesiz_context):
+    def tel(skip_id_context):
         def f(m):
             s = m.group(0)
             r = re.sub(r"\D", "", s)
@@ -1010,28 +1016,28 @@ def _mask_out_core(t, say):
                 return s
             if len(s) == 10 and s[0] == "5" and s.isdigit() and not _tel_context(m.string, m.start()):
                 return s  # bare 5XXXXXXXXX without a phone-like key: a size / count / row number
-            if sirkesiz_context and not s.startswith(("0", "+", "(")) and _id_context(m.string, m.start()):
+            if skip_id_context and not s.startswith(("0", "+", "(")) and _id_context(m.string, m.start()):
                 return s
-            say["TEL"] += 1
-            return _record(s, _token("TEL", r))
+            say["PHONE"] += 1
+            return _record(s, _token("PHONE", r))
         return f
 
     if re.search(r"(?i)tr\d\d", t):
         t = RE_IBAN.sub(iban, t)
     if re.search(r"\d{4}", t):
-        t = RE_KART.sub(card, t)
+        t = RE_CARD.sub(card, t)
     if "@" in t:
         t = RE_MAIL.sub(mail, t)
     if re.search(r"\d{11}", t):
-        t = RE_TCKN.sub(tckn, t)
+        t = RE_TR_ID.sub(tr_id, t)
     if re.search(r"\d{3}\D{1,3}\d{3}", t):
-        t = RE_TCKN_GRUP.sub(tckn, t)
+        t = RE_TR_ID_GROUPED.sub(tr_id, t)
     if re.search(r"\d{2}", t):
-        t = RE_TEL_COUNTRY.sub(tel(True), t)
-        t = RE_TEL_ZERO.sub(tel(True), t)
-        t = RE_TEL_POINT.sub(tel(True), t)
-        t = RE_TEL_PAREN.sub(tel(False), t)
-        t = RE_TEL_CEP.sub(tel(True), t)
+        t = RE_PHONE_COUNTRY.sub(tel(True), t)
+        t = RE_PHONE_ZERO.sub(tel(True), t)
+        t = RE_PHONE_POINT.sub(tel(True), t)
+        t = RE_PHONE_PAREN.sub(tel(False), t)
+        t = RE_PHONE_CEP.sub(tel(True), t)
     return t
 
 
@@ -1107,7 +1113,7 @@ def _parts(text, size=None):
             else:
                 ls = text.rfind("\n", i, j - 1) + 1
                 last = text[ls:j].rstrip()
-                if (last.endswith(":") or RE_NAME_LINE.match(last)) and RE_SIR_PRECHECK.search(last):
+                if (last.endswith(":") or RE_NAME_LINE.match(last)) and RE_SECRET_PRECHECK.search(last):
                     k = text.find("\n", j)
                     j = n if k < 0 else k + 1
             if j == j0:
@@ -1129,7 +1135,7 @@ SHORT = 2048  # a text this short is masked in one go (no piece splitting)
 CACHE_LENGTH = 256  # short texts (dict keys, repeated values) are cached: a tree repeats the same keys millions of times
 CACHE_MAX = 200_000
 _CACHE = {}
-_BUDGET_DONE = False  # the process-wide budget (_BITIS) is spent: _mask_out_tree stops and the rest of the tree is withheld
+_BUDGET_DONE = False  # the process-wide budget (_END_AT) is spent: _mask_out_tree stops and the rest of the tree is withheld
 
 
 def _mask_out_short(text, end_at):
@@ -1137,7 +1143,7 @@ def _mask_out_short(text, end_at):
     if time.monotonic() >= end_at:
         if _END_AT is not None:
             _BUDGET_DONE = True
-        return _hidden(text, "time budget exceeded"), collections.Counter({"ATLANDI": 1})
+        return _hidden(text, "time budget exceeded"), collections.Counter({"SKIPPED": 1})
     key = (text, _LEAF_KEY, _GH_IDENTITY) if len(text) <= CACHE_LENGTH else None
     if key is not None:
         o = _CACHE.get(key)
@@ -1150,10 +1156,10 @@ def _mask_out_short(text, end_at):
     except _TimeOverrun:
         if _END_AT is not None:
             _BUDGET_DONE = True
-        return _hidden(text, "time budget exceeded"), collections.Counter({"ATLANDI": 1})
+        return _hidden(text, "time budget exceeded"), collections.Counter({"SKIPPED": 1})
     except Exception:
         _count_log_error("mask-error")
-        return _hidden(text, "masking error"), collections.Counter({"ATLANDI": 1})
+        return _hidden(text, "masking error"), collections.Counter({"SKIPPED": 1})
     if key is not None:
         if len(_CACHE) >= CACHE_MAX:
             _CACHE.clear()
@@ -1164,7 +1170,7 @@ def _mask_out_short(text, end_at):
 def mask_out(text):
     """Return (masked_text, Counter). Never raises and never lets unmasked text through (fail closed): text is masked piece by
     piece; when the time budget runs out (or the interrupt fires inside a piece) the rest of the text is replaced by ONE notice
-    line, and a piece that raises is replaced by a notice. Counter key ATLANDI counts withheld parts."""
+    line, and a piece that raises is replaced by a notice. Counter key SKIPPED counts withheld parts."""
     global _BUDGET_DONE
     say = collections.Counter()
     if not isinstance(text, str) or not text or os.environ.get("TRIM_MASK_CLOSED") == "1":
@@ -1181,28 +1187,28 @@ def mask_out(text):
             remaining = end_at - time.monotonic()
             if remaining <= 0:
                 output.append(_hidden(text[a:], "time budget exceeded"))
-                say["ATLANDI"] += 1
+                say["SKIPPED"] += 1
                 _BUDGET_DONE = _END_AT is not None
                 break
             if b - a > unit_max:
                 output.append(_hidden(text[a:b], "line too long"))
-                say["ATLANDI"] += 1
+                say["SKIPPED"] += 1
                 continue
             try:
                 with _time_cap(remaining):
                     output.append(_mask_out_part(text[a:b], say))
             except _TimeOverrun:
                 output.append(_hidden(text[a:], "time budget exceeded"))
-                say["ATLANDI"] += 1
+                say["SKIPPED"] += 1
                 _BUDGET_DONE = _END_AT is not None
                 break
             except Exception:
                 _count_log_error("mask-error")
                 output.append(_hidden(text[a:b], "masking error"))
-                say["ATLANDI"] += 1
+                say["SKIPPED"] += 1
     except BaseException:  # e.g. the interrupt fired between pieces
         _count_log_error("mask-error")
-        return "[mask: masking error, output withheld]\n", collections.Counter({"ATLANDI": 1})
+        return "[mask: masking error, output withheld]\n", collections.Counter({"SKIPPED": 1})
     return "".join(output), say
 
 
@@ -1266,7 +1272,7 @@ def _mask_out_leaf(o, key):
 
 
 def _mask_out_count(o, key, say):
-    """A JSON number that is TCKN / phone / card shaped (`{"tckn": 12345678901}`) comes back as its masked text; None = unchanged."""
+    """A JSON number that is TR_ID / phone / card shaped (`{"tckn": 12345678901}`) comes back as its masked text; None = unchanged."""
     try:
         if isinstance(o, float):
             if not o.is_integer() or abs(o) >= 1e20:
@@ -1278,7 +1284,7 @@ def _mask_out_count(o, key, say):
         return None
     t = t.lstrip("-")
     n = len(t)
-    if not (n == 11 and _tckn_valid(t) or n in (10, 12) and t[0] in "59" or 13 <= n <= 19 and _card_valid(t)):
+    if not (n == 11 and _tr_id_valid(t) or n in (10, 12) and t[0] in "59" or 13 <= n <= 19 and _card_valid(t)):
         return None  # cheap shape check first: a tree can hold millions of numbers
     y, s = _mask_out_leaf(t, key)
     if y == t:
@@ -1301,7 +1307,7 @@ def _mask_out_tree(o, say, key=None):
         result, ch = [], False
         for x in o:
             if _budget_is_done():
-                say["ATLANDI"] += 1
+                say["SKIPPED"] += 1
                 ch = True
                 break
             y, c = _mask_out_tree(x, say, key)
@@ -1324,7 +1330,7 @@ def _mask_out_tree(o, say, key=None):
             if _budget_is_done():
                 # budget spent: only the envelope's fixed keys stay (value withheld), so the response keeps its shape; the rest
                 # of this dict is dropped and _general / _bash add ONE notice for everything left out
-                say["ATLANDI"] += 1
+                say["SKIPPED"] += 1
                 ch = True
                 if k in STRUCTURE_KEYS and k not in result:
                     if isinstance(x, str):
@@ -1435,7 +1441,7 @@ def trim(text, source=None):
     n = len(lines)
     if n <= THRESHOLD_LINE and len(text.encode("utf-8", "replace")) <= THRESHOLD_BYTES:
         return text, False
-    keep = set(range(min(BAS, n))) | set(range(max(n - LAST, 0), n))
+    keep = set(range(min(HEAD, n))) | set(range(max(n - LAST, 0), n))
     middle = [i for i in range(n) if i not in keep and ERROR_RE.search(lines[i])]
     if len(middle) > ERROR_MAX:
         middle = middle[:ERROR_MAX // 2] + middle[-ERROR_MAX // 2:]
@@ -1562,7 +1568,7 @@ HIDE_MAX = 20_000
 
 def _hide(o, counter=None):
     """Replace every string leaf by a notice (fail closed after an unexpected error in the hook). A tree of more than
-    GIZLE_AZAMI nodes raises instead (the caller then emits one fixed notice): no per-leaf notices for millions of leaves."""
+    HIDE_MAX nodes raises instead (the caller then emits one fixed notice): no per-leaf notices for millions of leaves."""
     counter = counter if counter is not None else [0]
     counter[0] += 1
     if counter[0] > HIDE_MAX:
@@ -1592,7 +1598,7 @@ def _hide_key(k, i, say=None):
     try:
         k1 = k.encode("utf-8", "replace").decode("utf-8", "replace")
         k2, s2 = mask_out(k1)
-        if s2.get("ATLANDI"):
+        if s2.get("SKIPPED"):
             return k if k in STRUCTURE_KEYS else f"[mask: key {i}]"
         if k2 == k:
             return k
@@ -1603,7 +1609,7 @@ def _hide_key(k, i, say=None):
         return k if k in STRUCTURE_KEYS else f"[mask: key {i}]"
 
 
-_SON_CARE = b'{"hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[mask: internal error, output withheld]"}}\n'
+_LAST_RESORT_OUTPUT = b'{"hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"[mask: internal error, output withheld]"}}\n'
 
 
 def _son_care(answer):
@@ -1616,11 +1622,11 @@ def _son_care(answer):
     except BaseException:
         pass
     try:
-        sys.stdout.buffer.write(_SON_CARE)
+        sys.stdout.buffer.write(_LAST_RESORT_OUTPUT)
         sys.stdout.flush()
     except BaseException:
         try:
-            os.write(1, _SON_CARE)
+            os.write(1, _LAST_RESORT_OUTPUT)
         except BaseException:
             pass
 
