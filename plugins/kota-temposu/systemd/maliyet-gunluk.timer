@@ -1,0 +1,12 @@
+[Unit]
+Description=Claude Code cost record and usage share, every 2 hours at :23
+
+[Timer]
+# Off-minute on purpose (not :00), plus a few minutes of random delay so teammates' machines do not push together.
+# The run itself commits only when the person's row or the ranking changed; a quiet run touches nothing.
+OnCalendar=*-*-* 00/2:23:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

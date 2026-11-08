@@ -1,0 +1,9 @@
+[Unit]
+Description=Lost-work check every day at 17:30 (run at the next start when missed)
+
+[Timer]
+OnCalendar=*-*-* 17:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

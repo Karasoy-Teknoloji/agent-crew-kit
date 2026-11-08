@@ -1,0 +1,21 @@
+{
+  "session_id": "sess-fixture-0001",
+  "transcript_path": "__TRANSCRIPT__",
+  "cwd": "__HOME__",
+  "prompt_id": "prompt-fixture-0001",
+  "effort": {"level": "high"},
+  "model": {"id": "claude-opus-5-5", "display_name": "Opus 5.5 (1M context)"},
+  "workspace": {"current_dir": "__HOME__", "project_dir": "__HOME__", "added_dirs": []},
+  "version": "2.1.312",
+  "cost": {"total_cost_usd": "__TOTAL__", "total_duration_ms": 2919000, "total_api_duration_ms": 2833204},
+  "context_window": {
+    "total_input_tokens": 154779, "total_output_tokens": 1370, "context_window_size": 1000000,
+    "current_usage": {"input_tokens": 2, "output_tokens": 1370, "cache_creation_input_tokens": 11150, "cache_read_input_tokens": 143627},
+    "used_percentage": 15, "remaining_percentage": 85
+  },
+  "prompt_cache": {"warm": true, "ttl": "1h", "requests": 18, "misses": 2, "hit_ratio": 0.9413741930663546},
+  "rate_limits": {
+    "five_hour": {"used_percentage": 60, "resets_at": "__R5__"},
+    "seven_day": {"used_percentage": 63, "resets_at": "__R7__"}
+  }
+}

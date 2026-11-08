@@ -1,0 +1,23 @@
+{
+  "session_id": "sess-fixture-0001",
+  "transcript_path": "__TRANSCRIPT__",
+  "cwd": "__HOME__",
+  "prompt_id": "prompt-fixture-0001",
+  "columns": 230,
+  "tasks": [
+    {
+      "id": "fx1",
+      "type": "local_agent",
+      "agentType": "senior-developer-oh",
+      "status": "running",
+      "description": "Fixture task: check the backup chain",
+      "label": "Checking the backup chain",
+      "startTime": "__START__",
+      "model": "claude-opus-5-5",
+      "effort": "high",
+      "contextWindowSize": 1000000,
+      "tokenCount": 68502,
+      "cwd": "__HOME__"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "example-dev-1": {"ad": "Emre", "rol": "yazilimci"},
+  "example-tester-1": {"ad": "Gül Ersoy", "rol": "testci"},
+  "example-tester-2": {"ad": "Kerem Ali Koç", "rol": "testci"},
+  "example-dev-2": {"ad": "Onur Demir", "rol": "yazilimci"},
+  "example-dev-3": {"ad": "Selim Akçay", "rol": "yazilimci"},
+  "example-tester-3": {"ad": "Hakan Şimşek", "rol": "testci"},
+  "example-lead": {"ad": "Leyla Aksoy", "rol": "yonetici"}
+}

@@ -1,0 +1,8 @@
+{
+  "name": "kota-temposu",
+  "version": "0.7.0",
+  "description": "Ekibin tek kota temposu: haftalik kota tahmini sifirlanmadan N saat (varsayilan 5) once bitecek sekilde hedeflenir; BOL/NORMAL/SIKI modu ve %90/%95 uyarilari. Istege bagli (kur --maliyet): Claude Code maliyet istatistikleri (API liste fiyati karsiligi, yerel).",
+  "author": {
+    "name": "agent-crew-kit contributors"
+  }
+}

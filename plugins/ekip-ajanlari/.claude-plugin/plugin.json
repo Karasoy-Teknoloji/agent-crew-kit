@@ -1,0 +1,8 @@
+{
+  "name": "ekip-ajanlari",
+  "version": "0.8.0",
+  "description": "Tools of the team agent set (subagent status line, ajan_adi naming hook, ajan-devral.ps1 handover) and the proaktif-kisa output style. The agents themselves (<role>-<model><effort>) live in agents/ at the repo root and load unprefixed through the ~/.claude/agents/claude-shared link (0.8.0: moved out of the plugin, plugin agents always carry the plugin prefix). kur.sh / kur.ps1 enable it straight from the claude-shared clone.",
+  "author": {
+    "name": "agent-crew-kit contributors"
+  }
+}
