@@ -50,7 +50,7 @@ TOOLS = [
     Tool("ssh", ["ssh"], REQUIRED, winget="Microsoft.OpenSSH.Beta", apt="openssh-client", brew="openssh",
          using="remote hosts and lab/build VMs, git over ssh"),
     Tool("jq", ["jq"], REQUIRED, winget="jqlang.jq", apt="jq", brew="jq", using="install.sh, statusline.sh, sh scripts and tests"),
-    Tool("curl", ["curl"], REQUIRED, winget="cURL.cURL", apt="curl", brew="curl", using="tools/vault.py, docs"),
+    Tool("curl", ["curl"], REQUIRED, winget="cURL.cURL", apt="curl", brew="curl", using="tools/vault_cli.py, docs"),
     Tool("node/npx", ["node"], RECOMMENDED, winget="OpenJS.NodeJS.LTS", apt="nodejs npm", brew="node", using="docs/browser-mcp.md (npx MCP servers)"),
     Tool("pdftoppm/pdftotext (poppler)", ["pdftoppm", "pdftotext"], RECOMMENDED, winget="oschwartz10612.Poppler", apt="poppler-utils",
          brew="poppler", all_=True, using="Claude Code Read tool (PDF pages need pdftoppm)"),

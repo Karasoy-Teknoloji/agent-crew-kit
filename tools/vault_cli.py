@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """vault: use Vault secrets without ever seeing or printing them.
 
-  vault.py run --env [NAME=]mount/path#field [--env ...] [--file [NAME=]mount/path#field] -- <command ...>
+  vault_cli.py run --env [NAME=]mount/path#field [--env ...] [--file [NAME=]mount/path#field] -- <command ...>
       (NAME defaults to the upper-cased field name; works with any command: psql, sqlcmd, mysql, gh, curl, ssh, dotnet)
-  vault.py check mount/path#field [...]     # prints "var (N karakter)" or "missing", never the value
-  vault.py fields mount/path                # prints field NAMES only
-  vault.py find <keyword...> [--refresh] [--all]   # FIND credentials: paths, field names, description (never values); all keywords must match
-  vault.py write mount/path#field [--clipboard | --stdin | --from-file PATH] [--keep-clipboard] [--not-secret | --short]   # writes a secret read from clipboard/stdin/file, never argv; --stdin/--from-file accept multi-line (PEM); --not-secret allows short non-secret values (ports) and marks the field non-secret; --short allows a short secret by design (PIN/OTP, >= 4 chars) that run still redacts
-  vault.py delete mount/path#field             # removes one field (other fields kept)
-  vault.py not-secret mount/path#field [--undo]   # declares an existing field non-secret (custom_metadata): run passes it on but does not redact it
-  vault.py migrate-descriptions [--apply]         # one-time: copy description fields into custom_metadata (bul then reads no values)
+  vault_cli.py check mount/path#field [...]     # prints "var (N karakter)" or "missing", never the value
+  vault_cli.py fields mount/path                # prints field NAMES only
+  vault_cli.py find <keyword...> [--refresh] [--all]   # FIND credentials: paths, field names, description (never values); all keywords must match
+  vault_cli.py write mount/path#field [--clipboard | --stdin | --from-file PATH] [--keep-clipboard] [--not-secret | --short]   # writes a secret read from clipboard/stdin/file, never argv; --stdin/--from-file accept multi-line (PEM); --not-secret allows short non-secret values (ports) and marks the field non-secret; --short allows a short secret by design (PIN/OTP, >= 4 chars) that run still redacts
+  vault_cli.py delete mount/path#field             # removes one field (other fields kept)
+  vault_cli.py not-secret mount/path#field [--undo]   # declares an existing field non-secret (custom_metadata): run passes it on but does not redact it
+  vault_cli.py migrate-descriptions [--apply]         # one-time: copy description fields into custom_metadata (bul then reads no values)
 
 Secrets reach the child only as environment variables (or as the path of a 0600 temp file that is
 deleted afterwards). The child's stdout/stderr are streamed with every secret value redacted (exact,
@@ -748,7 +748,7 @@ def cmd_bul(args):
         return 1
     more = len(hits) - len(shown)
     print(f"-- {len(hits)} match(es){f', {more} more hidden (add a keyword or --all)' if more > 0 else ''}. "
-          "Use one: vault.py run --env NAME=<path>#<field> -- <command>   (values are never printed)")
+          "Use one: vault_cli.py run --env NAME=<path>#<field> -- <command>   (values are never printed)")
     return 0
 
 
@@ -940,7 +940,7 @@ def main(argv=None):
     if argv and argv[0].lower() in REFUSED:
         print("vault: refused; there is no subcommand that prints secret values (use run/check/fields)", file=sys.stderr)
         return 2
-    ap = argparse.ArgumentParser(prog="vault.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="vault_cli.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="run a command with secrets in its environment, output redacted")
     r.add_argument("--env", action="append", metavar="[NAME=]mount/path#field")

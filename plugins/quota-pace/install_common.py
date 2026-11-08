@@ -89,7 +89,7 @@ RULES_WATCH = CLONE / "tools" / "rules_watch.py"
 HIDDEN_PS1 = CLONE / "tools" / "hidden.ps1"   # the one hidden-launch helper every Windows task snippet dot-sources
 LOST = CLONE / "tools" / "lost_work.py"
 LOST_ENTRY = CLONE / "tools" / "daily_lost_work.py"   # the ONE entry the daily job calls; its options live in the clone (no copy in the scheduler)
-EVIDENCE = CLONE / "tools" / "evidence_hook.py"   # Stop + SubagentStop hook: hedge words, missing-access claims without a `vault.py find` search, unrecorded decisions (Stop)
+EVIDENCE = CLONE / "tools" / "evidence_hook.py"   # Stop + SubagentStop hook: hedge words, missing-access claims without a `vault_cli.py find` search, unrecorded decisions (Stop)
 EVIDENCE_EVENTS = ("Stop", "SubagentStop")
 TOOL_CHECK = CLONE / "tools" / "tool_check.py"   # tool check + the Windows python3 shim (install.ps1 -Tools / install.sh --tools installs)
 GH_LIMIT = CLONE / "tools" / "gh_limit.py"   # gh shim ~/.local/bin/gh -> this clone's machine-wide GitHub API limiter
@@ -388,7 +388,7 @@ def merge_evidence_hook(cfg, python, remove):
                 out.append({**g, "hooks": kept})
         if not remove and not placed:
             out.append({"hooks": [new_entry]})
-            changes.append(f"{ev}: evidence_hook girisi eklendi (tahmin sozcukleri, vault.py find'suz 'yetki yok', yazilmamis karar)")
+            changes.append(f"{ev}: evidence_hook girisi eklendi (tahmin sozcukleri, vault_cli.py find'suz 'yetki yok', yazilmamis karar)")
         if out:
             cfg.setdefault("hooks", {})[ev] = out
         elif isinstance(cfg.get("hooks"), dict):
@@ -1660,8 +1660,8 @@ def stale_extra(a, python, tag):
         say(f"{tag}HATA: bayat birimleri bu klonda yok: {posix(source)} (agent-crew-kit bu araclari icermez: tools/slack-triage/ ekibin kendi ekidir; README, Optional team add-ons)")
         return False
     stale_py = SG_DIR / "stale.py"
-    vault_py = CLONE / "tools" / "vault.py"
-    # GitHub identity: explicit Vault token (GH_TOKEN via vault.py run, never printed), not the host's ambient `gh` login.
+    vault_py = CLONE / "tools" / "vault_cli.py"
+    # GitHub identity: explicit Vault token (GH_TOKEN via vault_cli.py run, never printed), not the host's ambient `gh` login.
     svc_text = re.sub(r"(?m)^ExecStart=.*$", lambda m: f"ExecStart={unit_q(str(python))} -X utf8 -I {unit_q(posix(vault_py))} run --env GH_TOKEN={STALE_GH_VAULT} -- {unit_q(str(python))} -X utf8 -I {unit_q(posix(stale_py))} runlog %h/.local/state/slack-triage %h/.local/state/slack-triage.log",
                       (source / f"{STALE_UNIT}.service").read_text(encoding="utf-8"))
     sg_unit_yaz(svc, svc_text, tag)

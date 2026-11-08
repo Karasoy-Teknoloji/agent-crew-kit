@@ -35,7 +35,7 @@ It is written only when no real `python3` is on PATH (the Store stub and our own
 | `gh` | required | `tools/gh_board.py:42`, `plugins/quota-pace/bin/last_window.py:304`, shim `tools/gh_limit.py` | `GitHub.cli` | `gh` |
 | `ssh` | required | agent need: remote hosts and lab/build VMs, git over ssh | built in (Windows OpenSSH, Git for Windows); `Microsoft.OpenSSH.Beta` | `openssh-client` |
 | `jq` | required | `plugins/quota-pace/install.sh:74` (refuses to install the status line without it), `plugins/quota-pace/statusline.sh:12`, sh scripts and tests | `jqlang.jq` | `jq` |
-| `curl` | required | `docs/vault.md:44`, `tools/vault.py:5` | built in (Windows 11, Git for Windows); `cURL.cURL` | `curl` |
+| `curl` | required | `docs/vault_cli.md:44`, `tools/vault_cli.py:5` | built in (Windows 11, Git for Windows); `cURL.cURL` | `curl` |
 | `node` / `npx` | recommended | `docs/browser-mcp.md:17` (Playwright and DevTools MCP servers) | `OpenJS.NodeJS.LTS` | `nodejs npm` |
 | `pdftoppm`, `pdftotext` (poppler) | recommended | agent need: Claude Code's Read tool renders PDF pages with `pdftoppm` | `oschwartz10612.Poppler` | `poppler-utils` |
 | `pypdf` (Python package) | recommended | agent need: PDF text extraction from Python | `pip install --user pypdf` | `python3-pypdf` |

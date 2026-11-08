@@ -17,7 +17,7 @@ Many tool names, messages and some docs are Turkish (the original team's languag
 | `rules/AUTONOMY.md` | Claude decides instead of asking, delegates to background agents, watches them, and adds no restrictions you did not ask for. |
 | `plugins/quota-pace/` | Quota pace ("kota temposu"): weekly forecast aimed N hours (default 5) before the reset, PLENTY/NORMAL/TIGHT mode, status line for Linux, macOS and Windows, local cost statistics, opt-in team usage ranking, opt-in "last window" runs. Turkish docs: [`INSTALL.md`](plugins/quota-pace/INSTALL.md), [`COST.md`](plugins/quota-pace/COST.md). |
 | `plugins/crew-agents/` | Tools of the agent set: subagent status line, a hook that names every spawned subagent, a hand-over script, the `proactive-concise` output style. |
-| `tools/vault.py` | Use Vault secrets without seeing them (`run`, `check`, `fields`), find the right credential first (`find`: path, field-name and description search, never values). See [`docs/vault.md`](docs/vault.md). |
+| `tools/vault_cli.py` | Use Vault secrets without seeing them (`run`, `check`, `fields`), find the right credential first (`find`: path, field-name and description search, never values). See [`docs/vault_cli.md`](docs/vault_cli.md). |
 | `tools/evidence_hook.py` | Evidence hook (Stop/SubagentStop). See "Evidence hook" below. |
 | `tools/gh_limit.py` | Machine-wide `gh` wrapper that keeps all sessions inside the GitHub API limits (concurrency, pacing, ETag cache, back-off on 403/429). |
 | `tools/gh_board.py` | GitHub Projects v2 helper: cached ids, batched board updates, item lists, management progress view. |
@@ -75,7 +75,7 @@ Edit the rule files on that branch and commit. Changes on `main` reach you only 
 
 ### Evidence hook
 
-`tools/evidence_hook.py` blocks the assistant's final message when it (1) hedges ("probably", "likely", "muhtemelen", ...), (2) claims missing access or asks for a credential without a `vault.py find` search in the same turn, or (3) answers a decision from the user without recording it on GitHub (or a `Karar kaydı: ...` line). It never loops and fails open. The installer registers it for `Stop` and `SubagentStop`.
+`tools/evidence_hook.py` blocks the assistant's final message when it (1) hedges ("probably", "likely", "muhtemelen", ...), (2) claims missing access or asks for a credential without a `vault_cli.py find` search in the same turn, or (3) answers a decision from the user without recording it on GitHub (or a `Karar kaydı: ...` line). It never loops and fails open. The installer registers it for `Stop` and `SubagentStop`.
 
 ## Configuration
 
@@ -83,8 +83,8 @@ Every setting has a documented default, so the kit works standalone. A key is re
 
 | Key | File | Default | Used by |
 |---|---|---|---|
-| `VAULT_ADDR`, `VAULT_TOKEN` | `~/.vault-token` | none: `vault.py` exits with "VAULT_ADDR is not set" | `tools/vault.py` |
-| `VAULT_FIND_EXCLUDING` | | none | `vault.py find`: comma-separated `<mount>/<path>/` prefixes never listed or read (e.g. an alerting backup tier) |
+| `VAULT_ADDR`, `VAULT_TOKEN` | `~/.vault-token` | none: `vault_cli.py` exits with "VAULT_ADDR is not set" | `tools/vault_cli.py` |
+| `VAULT_FIND_EXCLUDING` | | none | `vault_cli.py find`: comma-separated `<mount>/<path>/` prefixes never listed or read (e.g. an alerting backup tier) |
 | `GH_ORG` | `org` | none: the GitHub org features are off | `tools/gh_board.py` (required), the ranking's 7-day commit column, the last-window issue search |
 | `GH_BOARD_TEST_QUEUE` | | `0` (none) | `gh_board.py`: number of an org-wide test-queue project |
 | `CLAUDE_SHARED_REMOTE` | `remote` | none: the usage ranking and the last-window journal are off | clone URL of the team's shared usage repo |

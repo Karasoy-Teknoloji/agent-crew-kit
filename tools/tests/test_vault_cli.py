@@ -1,4 +1,4 @@
-"""Tests for tools/vault.py with a fake Vault (mock HTTP). Run: python -m unittest discover -s tools/tests"""
+"""Tests for tools/vault_cli.py with a fake Vault (mock HTTP). Run: python -m unittest discover -s tools/tests"""
 import base64
 import contextlib
 import hashlib
@@ -15,7 +15,7 @@ import unittest
 import urllib.parse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import vault  # noqa: E402
+import vault_cli  # noqa: E402
 
 SECRET = "p@ss w/rd\"+9Zq"
 RECORDS = {"app/db": {"password": SECRET, "user": "svc"}}
@@ -86,7 +86,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if p.startswith("/v1/secret/metadata/"):
             key = p[len("/v1/secret/metadata/"):]
             META[key] = body["custom_metadata"]
-            META_SETTINGS[key] = {k: body.get(k) for k in vault.META_KEEP}  # what a full-replace POST would leave behind
+            META_SETTINGS[key] = {k: body.get(k) for k in vault_cli.META_KEEP}  # what a full-replace POST would leave behind
             self.send_response(204)
             self.end_headers()
             return
@@ -122,7 +122,7 @@ class RedactionTests(unittest.TestCase):
         for form in forms:
             data = ("before " + form + " after\n").encode()
             for size in (1, 2, 3, 5, 7, 64, 4096):
-                out = feed_all(vault.Redactor([SECRET]), data, size)
+                out = feed_all(vault_cli.Redactor([SECRET]), data, size)
                 self.assertNotIn(form.encode(), out, (form, size))
                 self.assertIn(b"***", out)
                 self.assertTrue(out.startswith(b"before ") and out.rstrip().endswith(b"after"))
@@ -131,13 +131,13 @@ class RedactionTests(unittest.TestCase):
         for s in (b"ghp_" + b"A" * 36, b"github_pat_" + b"B" * 30, b"hvs." + b"C" * 40,
                   b"eyJhbGciOiJIUzI1NiJ9." b"eyJzdWIiOiIxMjM0In0.abcdefghijk"):
             for size in (1, 9, 4096):
-                out = feed_all(vault.Redactor([]), b"x " + s + b" y", size)
+                out = feed_all(vault_cli.Redactor([]), b"x " + s + b" y", size)
                 self.assertNotIn(s, out)
-        out = feed_all(vault.Redactor([]), b"password=hunter22 ok", 3)
+        out = feed_all(vault_cli.Redactor([]), b"password=hunter22 ok", 3)
         self.assertEqual(out, b"password=*** ok")
 
     def test_plain_output_untouched(self):
-        self.assertEqual(feed_all(vault.Redactor(["abcd1234"]), b"hello world\n", 2), b"hello world\n")
+        self.assertEqual(feed_all(vault_cli.Redactor(["abcd1234"]), b"hello world\n", 2), b"hello world\n")
 
 
 class FakeVaultTests(unittest.TestCase):
@@ -155,11 +155,11 @@ class FakeVaultTests(unittest.TestCase):
     def run_main(self, argv):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = vault.main(argv)
+            rc = vault_cli.main(argv)
         return rc, out.getvalue(), err.getvalue()
 
     def run_child(self, argv):
-        p = subprocess.run([sys.executable, vault.__file__, *argv], capture_output=True, env=dict(os.environ))
+        p = subprocess.run([sys.executable, vault_cli.__file__, *argv], capture_output=True, env=dict(os.environ))
         return p.returncode, p.stdout, p.stderr
 
     def test_check_and_fields_never_show_value(self):
@@ -226,12 +226,12 @@ class WriteTests(unittest.TestCase):
         RECORDS.pop("w/new", None)
         VERSIONS.pop("w/new", None)
         self.clip = {"v": "tok-ABCDEFGH-12345\r\n"}
-        self._r, self._c = vault.clipboard_read, vault.clipboard_clear
-        vault.clipboard_read = lambda: self.clip["v"]
-        vault.clipboard_clear = lambda: self.clip.update(v="") or True
+        self._r, self._c = vault_cli.clipboard_read, vault_cli.clipboard_clear
+        vault_cli.clipboard_read = lambda: self.clip["v"]
+        vault_cli.clipboard_clear = lambda: self.clip.update(v="") or True
 
     def tearDown(self):
-        vault.clipboard_read, vault.clipboard_clear = self._r, self._c
+        vault_cli.clipboard_read, vault_cli.clipboard_clear = self._r, self._c
 
     def test_pano_merges_clears_clipboard_prints_no_value(self):
         rc, out, err = self.run_main(["write", "secret/w/rec#token", "--clipboard"])
@@ -251,12 +251,12 @@ class WriteTests(unittest.TestCase):
         self.assertIn("surum 1", out)
 
     def test_cas_conflict_leaves_data_and_clipboard(self):
-        orig = vault._read_v2
-        vault._read_v2 = lambda p: ({"keep": "other-value-1"}, 2)  # stale version
+        orig = vault_cli._read_v2
+        vault_cli._read_v2 = lambda p: ({"keep": "other-value-1"}, 2)  # stale version
         try:
             rc, out, err = self.run_main(["write", "secret/w/rec#token", "--clipboard"])
         finally:
-            vault._read_v2 = orig
+            vault_cli._read_v2 = orig
         self.assertEqual(rc, 3)
         self.assertIn("check-and-set", err)
         self.assertNotIn("ABCDEFGH", out + err)
@@ -420,27 +420,27 @@ class BuildLockTests(unittest.TestCase):
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
 
     def test_second_holder_times_out_then_gets_it_after_release(self):
-        with vault.BuildLock(timeout=1) as a:
+        with vault_cli.BuildLock(timeout=1) as a:
             self.assertTrue(a.acquired)
             if os.name != "nt":
-                self.assertEqual(os.stat(vault.lock_file()).st_mode & 0o777, 0o600)
+                self.assertEqual(os.stat(vault_cli.lock_file()).st_mode & 0o777, 0o600)
             t0 = time.time()
-            with vault.BuildLock(timeout=0.5) as b:
+            with vault_cli.BuildLock(timeout=0.5) as b:
                 self.assertFalse(b.acquired)  # timeout: the caller builds without the lock
             self.assertGreaterEqual(time.time() - t0, 0.5)
-        with vault.BuildLock(timeout=1) as c:
+        with vault_cli.BuildLock(timeout=1) as c:
             self.assertTrue(c.acquired)
 
     def test_lock_of_a_dead_process_is_taken_over(self):
-        code = ("import sys; sys.path.insert(0, %r); import vault; l = vault.BuildLock().__enter__(); "
+        code = ("import sys; sys.path.insert(0, %r); import vault_cli; l = vault_cli.BuildLock().__enter__(); "
                 "assert l.acquired; import os; os._exit(0)" % os.path.join(os.path.dirname(__file__), ".."))
         subprocess.run([sys.executable, "-c", code], check=True)  # exits holding the lock; the OS drops it
-        with vault.BuildLock(timeout=1) as b:
+        with vault_cli.BuildLock(timeout=1) as b:
             self.assertTrue(b.acquired)
 
 
 class BulTests(unittest.TestCase):
-    """vault.py find: path / field name / description search, values never printed, cache 0600."""
+    """vault_cli.py find: path / field name / description search, values never printed, cache 0600."""
 
     @classmethod
     def setUpClass(cls):
@@ -470,7 +470,7 @@ class BulTests(unittest.TestCase):
     def find(self, *argv):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = vault.main(["find", *argv])
+            rc = vault_cli.main(["find", *argv])
         return rc, out.getvalue(), err.getvalue()
 
     def test_finds_path_by_all_keywords_and_never_prints_values(self):
@@ -495,7 +495,7 @@ class BulTests(unittest.TestCase):
 
     def test_cache_holds_names_not_values_and_is_private(self):
         self.find("panel")
-        path = vault.cache_file()
+        path = vault_cli.cache_file()
         raw = open(path, encoding="utf-8").read()
         self.assertNotIn("tok-VALUE", raw)
         self.assertNotIn("tok-OTHER", raw)
@@ -532,7 +532,7 @@ class BulTests(unittest.TestCase):
 
     def test_old_format_cache_is_replaced_not_used(self):
         import time
-        path = vault.cache_file()
+        path = vault_cli.cache_file()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:  # format 1: no "v", fresh, same address
             json.dump({"records": [{"p": "secret/old/rec", "f": ["x"], "d": "old-desc-MARKER"}], "skipped": 0,
@@ -542,13 +542,13 @@ class BulTests(unittest.TestCase):
         with open(path, encoding="utf-8") as f:
             raw = f.read()
         self.assertNotIn("MARKER", raw)
-        self.assertEqual(json.loads(raw)["v"], vault.INDEX_VERSION)
+        self.assertEqual(json.loads(raw)["v"], vault_cli.INDEX_VERSION)
 
     def test_five_cold_processes_build_once(self):
         global DELAY
-        os.remove(vault.cache_file()) if os.path.exists(vault.cache_file()) else None
+        os.remove(vault_cli.cache_file()) if os.path.exists(vault_cli.cache_file()) else None
         env = dict(os.environ, VAULT_REQUEST_COUNTER="1")
-        script = os.path.join(os.path.dirname(__file__), "..", "vault.py")
+        script = os.path.join(os.path.dirname(__file__), "..", "vault_cli.py")
         DELAY = 0.15
         try:
             procs = [subprocess.Popen([sys.executable, script, "find", "panel", "okuma"], env=env, stdout=subprocess.PIPE,
@@ -566,7 +566,7 @@ class BulTests(unittest.TestCase):
         NO_SUBKEYS.add("panel/publish-token")
         try:
             self.find("--refresh", "okuma")  # the publish record is indexed but not shown
-            with open(vault.cache_file(), encoding="utf-8") as f:
+            with open(vault_cli.cache_file(), encoding="utf-8") as f:
                 idx = json.load(f)
             rec = next(r for r in idx["records"] if r["p"] == "secret/panel/publish-token")
             self.assertIsNone(rec["f"])  # path only after the build
@@ -586,7 +586,7 @@ class BulTests(unittest.TestCase):
         def run(*argv):
             out, err = io.StringIO(), io.StringIO()
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                rc = vault.main(["migrate-descriptions", *argv])
+                rc = vault_cli.main(["migrate-descriptions", *argv])
             return rc, out.getvalue(), err.getvalue()
         META.pop("panel/publish-token", None)
         SEEN.clear()
@@ -610,7 +610,7 @@ class BulTests(unittest.TestCase):
     def test_request_counter(self):
         os.environ["VAULT_REQUEST_COUNTER"] = "1"
         try:
-            vault.REQUESTS.clear()
+            vault_cli.REQUESTS.clear()
             _, _, err = self.find("--refresh", "panel")
         finally:
             os.environ.pop("VAULT_REQUEST_COUNTER", None)

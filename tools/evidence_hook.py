@@ -137,7 +137,7 @@ _BENIGN_ABSENCE = re.compile(
     r"\b(?:kod|repo|kaynak|dosya|commit|diff|gecmis|branch|log)\w*\s+(?:\S+\s+){0,3}?"
     r"(?:token|pat|anahtar|sifre|parola|kimlik\s+bilgisi|credential|api\s*key)\w*\s+(?:yok|bulunmuyor|kalmadi)\b")
 _BUL_RUN = re.compile(r"\bkasa(?:\.py)?[\"']?\s+bul\b")
-# Session memory: a `vault.py find` run (Bash call) or citation (assistant text) anywhere earlier in the same transcript within
+# Session memory: a `vault_cli.py find` run (Bash call) or citation (assistant text) anywhere earlier in the same transcript within
 # the last BUL_MEMORY_HOURS counts like a search in the current turn. Env EVIDENCE_HOOK_FIND_HOURS overrides (0 = turn only).
 BUL_MEMORY_HOURS = float(os.environ.get("KANIT_KANCASI_BUL_HOURS") or 3)
 SESSION_TAIL_BYTES = 32 * 1024 * 1024  # read lazily, only when a claim was found and the turn has no search
