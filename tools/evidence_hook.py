@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Stop / SubagentStop hook: block a final assistant message that (1) contains a hedge word (a guess dressed as a fact) or
 (2) claims missing access ("no token", "permission denied", or the Turkish "yetki yok") or asks for a credential/permission without a
-`vault_cli.py find` Vault search in the same turn or earlier in the session (last few hours), or (3, Stop only) ends a turn whose
+Vault search (`vault_cli.py find`, or the commands of the config key `evidence-search-commands`) in the same turn or earlier in the
+session (last few hours), or (3, Stop only) ends a turn whose
 user prompt was a decision that the turn did not record on GitHub.
 
 Team rules: WORKING-RULES.md "No probabilities in reports" / "Evidence before claims" / "Decisions live on GitHub", AUTONOMY.md
@@ -18,10 +19,13 @@ folded (I/ı/İ/i), on word boundaries. The hook reads Turkish and English chat,
 lists below are input data and stay Turkish on purpose.
 
 Access-claim check: a claim pattern (see _CLAIM_SOURCES: OUR missing access/permission/credential, or a request to the user for
-one) in the same prose (code/quotes removed) is allowed when the turn's tool calls include a Bash command running `vault_cli.py find`
+one) in the same prose (code/quotes removed) is allowed when the turn's tool calls include a Bash command running a search command
 (the turn = the transcript after the last real user prompt; for SubagentStop the subagent's own `agent_transcript_path`), when
-the message itself cites `vault_cli.py find`, or when the same transcript shows a `vault_cli.py find` run or citation within the last
-FIND_MEMORY_HOURS (3 h, env EVIDENCE_HOOK_FIND_HOURS; session memory, see find_in_session). A bare HTTP status (401/403) in a result
+the message itself cites one, or when the same transcript shows a search run or citation within the last
+FIND_MEMORY_HOURS (3 h, env EVIDENCE_HOOK_FIND_HOURS; session memory, see find_in_session). The accepted search commands are
+SEARCH_COMMANDS (default `vault_cli.py find`): a comma-separated list read through tools/settings.py, config key
+`evidence-search-commands` (env EVIDENCE_HOOK_SEARCH_COMMANDS, ~/.config/claude-shared/evidence-search-commands, or
+<clone>/team-config/evidence-search-commands), so a downstream team can accept its own command name. A bare HTTP status (401/403) in a result
 report about an external system is not a claim. An unreadable
 transcript means "unknown" and never blocks.
 
@@ -49,6 +53,42 @@ import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# Search commands that satisfy the access-claim check: a comma-separated list of "<tool>[.py] <subcommand>" phrases.
+SEARCH_COMMANDS_DEFAULT = "vault_cli.py find"
+
+
+def _configured_commands():
+    """The raw config value (one reader: tools/settings.py). Any problem (no settings.py next to a --copy install, an import
+    error) means the default: the hook fails open and never stops on its own configuration."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # python -I drops the script dir
+        import settings
+        return settings.value("evidence-search-commands", "EVIDENCE_HOOK_SEARCH_COMMANDS", SEARCH_COMMANDS_DEFAULT)
+    except Exception:
+        return SEARCH_COMMANDS_DEFAULT
+
+
+def search_commands(spec):
+    """The phrases of a comma-separated spec, whitespace-normalised; the default when the spec holds none."""
+    found = [" ".join(p.split()) for p in (spec or "").split(",") if p.strip()]
+    return found or [SEARCH_COMMANDS_DEFAULT]
+
+
+def search_pattern(commands):
+    """Regex matching a run or citation of any phrase: the tool name with or without `.py` (optionally quoted), then the
+    subcommand words separated by whitespace, ending on a word boundary."""
+    alts = []
+    for phrase in commands:
+        tool, *rest = phrase.split()
+        alts.append(re.escape(tool[:-3] if tool.endswith(".py") else tool) + r"(?:\.py)?[\"']?"
+                    + "".join(r"\s+" + re.escape(w) for w in rest))
+    return re.compile(r"\b(?:" + "|".join(alts) + r")\b")
+
+
+SEARCH_COMMANDS = search_commands(_configured_commands())
+_FIND_RUN = search_pattern(SEARCH_COMMANDS)
+SEARCH_CMD = SEARCH_COMMANDS[0]   # the one named in the block reason
 
 # Hedge words: Turkish ones are input data (the hook reads Turkish chat), the English ones follow.
 HEDGES = ["muhtemelen", "büyük ihtimalle", "büyük olasılıkla", "galiba", "sanırım", "herhalde", "olsa gerek",
@@ -90,9 +130,9 @@ def find_hedge(text):
 
 # ---- access claims -------------------------------------------------------------------------------------------------------
 REASON_ACCESS = ("Your last message claims missing access or asks for a credential/permission ('{claim}'), but neither this turn nor "
-                 "the last hours of this session show a `vault_cli.py find` search. A working credential may already sit in Vault (e.g. a 403 on the publish token while a "
-                 "read-scope token existed). Now: run `vault_cli.py find <system> [<scope>]` (e.g. `vault_cli.py find panel read`), try every "
-                 "matching credential with `vault_cli.py run --env NAME=<path>#<field> -- <command>`, then restate and list the searches "
+                 "the last hours of this session show a `{search}` search. A working credential may already sit in Vault (e.g. a 403 on the publish token while a "
+                 "read-scope token existed). Now: run `{search} <system> [<scope>]` (e.g. `{search} panel read`), try every "
+                 "matching credential with the same tool's `run` command (`<tool> run --env NAME=<path>#<field> -- <command>`), then restate and list the searches "
                  "and the credentials you tried. Ask a person only for what still fails after that, as one action.")
 # A subagent's coordinator receives only its last message, so a short follow-up ("the report above stands") loses the report.
 RESTATE = ("Then write your COMPLETE final report again in your next message (the reader receives only your last message); "
@@ -139,8 +179,7 @@ _CLAIMS = re.compile("(?:" + "|".join(_CLAIM_SOURCES) + ")")
 _BENIGN_ABSENCE = re.compile(
     r"\b(?:kod|repo|kaynak|dosya|commit|diff|gecmis|branch|log)\w*\s+(?:\S+\s+){0,3}?"
     r"(?<!\w)(?:token|pat(?!\w)|anahtar|sifre|parola|kimlik\s+bilgisi|credential|api\s*key)\w*\s+(?:yok|bulunmuyor|kalmadi)\b")
-_FIND_RUN = re.compile(r"\bvault_cli(?:\.py)?[\"']?\s+find\b")
-# Session memory: a `vault_cli.py find` run (Bash call) or citation (assistant text) anywhere earlier in the same transcript within
+# Session memory: a search-command run (Bash call) or citation (assistant text) anywhere earlier in the same transcript within
 # the last FIND_MEMORY_HOURS counts like a search in the current turn. Env EVIDENCE_HOOK_FIND_HOURS overrides (0 = turn only).
 FIND_MEMORY_HOURS = float(os.environ.get("EVIDENCE_HOOK_FIND_HOURS") or 3)
 SESSION_TAIL_BYTES = 32 * 1024 * 1024  # read lazily, only when a claim was found and the turn has no search
@@ -148,7 +187,7 @@ SESSION_TAIL_BYTES = 32 * 1024 * 1024  # read lazily, only when a claim was foun
 
 def find_access_claim(text):
     """Return the first missing-access / credential-request claim in the prose outside code and quotes, or None.
-    A message that cites `vault_cli.py find` (the search it ran) has no claim to answer for."""
+    A message that cites a search command (the search it ran) has no claim to answer for."""
     if _FIND_RUN.search(text):
         return None
     m = _CLAIMS.search(_BENIGN_ABSENCE.sub(" ", fold_ascii(strip_quoted(text))))
@@ -210,7 +249,7 @@ def _human_text(entry):
 
 
 class Turn:
-    """What the current turn did. ran_find: a Bash call ran `vault_cli.py find`; handback: the SubagentHandback report text;
+    """What the current turn did. ran_find: a Bash call ran a search command (SEARCH_COMMANDS); handback: the SubagentHandback report text;
     recorded: a tool call recorded a decision on GitHub or delegated that (records_decision); prompt: the human prompt text
     ("" when no person started the turn); prev_text: the last assistant text before that prompt (the proposal a reply answers)."""
 
@@ -265,7 +304,7 @@ def _entry_time(entry):
 
 
 def find_in_session(path, hours=None):
-    """Whether the transcript shows a `vault_cli.py find` run or citation within the last `hours` (default FIND_MEMORY_HOURS), in any
+    """Whether the transcript shows a search-command run or citation within the last `hours` (default FIND_MEMORY_HOURS), in any
     turn. Entries without a readable timestamp do not count (unknown age). Unreadable transcript: False (the caller decides)."""
     hours = FIND_MEMORY_HOURS if hours is None else hours
     if hours <= 0:
@@ -429,7 +468,7 @@ def main():
     if turn is not None and not turn.ran_find:
         claim = find_access_claim(text + "\n" + turn.handback)
         if claim and not find_in_session(tpath):
-            reasons.append(REASON_ACCESS.format(claim=claim))
+            reasons.append(REASON_ACCESS.format(claim=claim, search=SEARCH_CMD))
     # decisions: main session only (subagents act on briefs, not on user decisions)
     if turn is not None and not subagent and not turn.recorded and not _RECORD_LINE.search(fold_ascii(text)):
         marker = find_decision(turn.prompt, turn.prev_text)

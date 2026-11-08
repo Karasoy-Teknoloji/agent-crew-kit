@@ -5,6 +5,7 @@ Run: python -m unittest discover -s tools/tests
 # Turkish locale data: the Turkish chat samples and word lists below are the hook's input (it reads Turkish and English chat), not untranslated prose.
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -33,9 +34,10 @@ CP1252_RUNNER = (
     "    sys.stdout.flush(); sys.stderr.flush()\n")
 
 
-def run(payload, raw=None, cp1252=False):
+def run(payload, raw=None, cp1252=False, env=None):
     stdin = raw if raw is not None else json.dumps(payload, ensure_ascii=False)
-    env = {**os.environ, "EVIDENCE_HOOK_LOG": str(LOG)}
+    # the hook reads its search commands through tools/settings.py: a developer's own setting must not change a test result
+    env = {**{k: v for k, v in os.environ.items() if k != "EVIDENCE_HOOK_SEARCH_COMMANDS"}, "EVIDENCE_HOOK_LOG": str(LOG), **(env or {})}
     cmd = [sys.executable, "-I", "-c", CP1252_RUNNER, str(SCRIPT)] if cp1252 else [sys.executable, "-I", str(SCRIPT)]
     p = subprocess.run(cmd, input=stdin.encode("utf-8"), capture_output=True, timeout=10, env=env)
     return p.returncode, p.stdout.decode("utf-8"), p.stderr.decode("utf-8")
@@ -121,13 +123,13 @@ RESULT = {"type": "user", "message": {"content": [{"type": "tool_result", "conte
 class AccessClaims(unittest.TestCase):
     """The access-claim check: a missing-access claim needs a `vault_cli.py find` run in the same turn (or a cite in the message)."""
 
-    def hook(self, msg, rows, event="Stop", **extra):
+    def hook(self, msg, rows, event="Stop", env=None, **extra):
         with tempfile.TemporaryDirectory() as d:
             t = Path(d) / "t.jsonl"
             t.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
             payload = {"hook_event_name": event, "last_assistant_message": msg, **extra}
             payload.setdefault("agent_transcript_path" if event == "SubagentStop" else "transcript_path", str(t))
-            code, out, err = run(payload)
+            code, out, err = run(payload, env=env)
             self.assertEqual((code, err), (0, ""))
             return json.loads(out) if out.strip() else None
 
@@ -250,6 +252,60 @@ class AccessClaims(unittest.TestCase):
         self.assertIn("vault_cli.py find", r["reason"])
         self.assertIn("Then write your COMPLETE final report again in your next message", r["reason"])
         self.assertIn("do not refer to 'the report above'", r["reason"])
+
+
+class SearchCommands(unittest.TestCase):
+    """The accepted Vault-search commands come from tools/settings.py (key evidence-search-commands); a team supplies its own command name."""
+    CLAIM = "Okuma token'ıyla da 403 aldım, yetkimiz yok."
+    ROWS = [PROMPT, bash("python3 tools/team_vault.py lookup lisans okuma"), RESULT, bash("curl ..."), RESULT]
+    hook = AccessClaims.hook
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d, True)
+        home = os.path.join(self.d, "home")
+        os.makedirs(home)
+        # a scratch HOME and an empty team-config dir: only what the test sets is read
+        self.env = {"HOME": home, "USERPROFILE": home, "CLAUDE_SHARED_TEAM_CONFIG_DIR": os.path.join(self.d, "team-config")}
+        os.makedirs(self.env["CLAUDE_SHARED_TEAM_CONFIG_DIR"])
+
+    def test_default_accepts_only_the_kit_command(self):
+        self.assertEqual(self.hook(self.CLAIM, self.ROWS, env=self.env)["decision"], "block")
+        self.assertIsNone(self.hook(self.CLAIM, [PROMPT, bash("python3 tools/vault_cli.py find lisans okuma"), RESULT], env=self.env))
+
+    def test_team_config_file_adds_a_command(self):
+        Path(self.env["CLAUDE_SHARED_TEAM_CONFIG_DIR"], "evidence-search-commands").write_text("vault_cli.py find, team_vault.py lookup", encoding="utf-8")
+        self.assertIsNone(self.hook(self.CLAIM, self.ROWS, env=self.env))
+        self.assertIsNone(self.hook(self.CLAIM, [PROMPT, bash("vault_cli find x"), RESULT], env=self.env))   # the kit command stays listed here
+        self.assertIsNone(self.hook("Aradım: `team_vault lookup lisans`; 403 aldım, yetkimiz yok.", [PROMPT], env=self.env))   # citing it also counts
+
+    def test_env_overrides_the_team_file(self):
+        Path(self.env["CLAUDE_SHARED_TEAM_CONFIG_DIR"], "evidence-search-commands").write_text("team_vault.py lookup", encoding="utf-8")
+        env = {**self.env, "EVIDENCE_HOOK_SEARCH_COMMANDS": "other.py scan"}
+        self.assertEqual(self.hook(self.CLAIM, self.ROWS, env=env)["decision"], "block")
+        self.assertIsNone(self.hook(self.CLAIM, [PROMPT, bash("other.py scan x"), RESULT], env=env))
+
+    def test_block_reason_names_the_first_configured_command(self):
+        env = {**self.env, "EVIDENCE_HOOK_SEARCH_COMMANDS": "team_vault.py lookup, vault_cli.py find"}
+        reason = self.hook(self.CLAIM, [PROMPT], env=env)["reason"]
+        self.assertIn("`team_vault.py lookup <system> [<scope>]`", reason)
+        self.assertNotIn("vault_cli.py find", reason)
+
+    def test_an_empty_or_blank_value_means_the_default(self):
+        for spec in ("", " , ,"):
+            env = {**self.env, "EVIDENCE_HOOK_SEARCH_COMMANDS": spec}
+            self.assertIn("vault_cli.py find", self.hook(self.CLAIM, [PROMPT], env=env)["reason"])
+
+    def test_pattern_matches_whole_commands_only(self):
+        sys.path.insert(0, str(SCRIPT.parent))
+        import evidence_hook as eh
+        rx = eh.search_pattern(eh.search_commands("vault_cli.py find, team_vault.py lookup"))
+        for hit in ["vault_cli find x", "python3 tools/vault_cli.py  find x", "'team_vault.py' lookup", "~/bin/team_vault lookup a"]:
+            self.assertTrue(rx.search(hit), hit)
+        for miss in ["vault_cli.py findx", "my_team_vault lookup", "team_vault.py lookups", "vault_cli.py run"]:
+            self.assertFalse(rx.search(miss), miss)
+        self.assertEqual(eh.search_commands("a.py x ,  , b y"), ["a.py x", "b y"])
+        self.assertEqual(eh.search_commands(""), [eh.SEARCH_COMMANDS_DEFAULT])
 
 
 def human(text):
