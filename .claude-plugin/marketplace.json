@@ -8,14 +8,14 @@
   },
   "plugins": [
     {
-      "name": "kota-temposu",
-      "source": "./plugins/kota-temposu",
-      "description": "The team's single quota pace forecast: weekly use aimed N hours (default 5) before the reset; optional cost statistics (kur --maliyet)"
+      "name": "quota-pace",
+      "source": "./plugins/quota-pace",
+      "description": "The team's single quota pace forecast: weekly use aimed N hours (default 5) before the reset; optional cost statistics (install --cost)"
     },
     {
-      "name": "ekip-ajanlari",
-      "source": "./plugins/ekip-ajanlari",
-      "description": "Tools and the proaktif-kisa output style of the team agent set (<role>-<model><effort>: quick-task-hm ... principal-engineer-omax). The agent files live in agents/ at the repo root and load unprefixed through the ~/.claude/agents/claude-shared link that kota-temposu/kur makes"
+      "name": "crew-agents",
+      "source": "./plugins/crew-agents",
+      "description": "Tools and the proactive-concise output style of the team agent set (<role>-<model><effort>: quick-task-hm ... principal-engineer-omax). The agent files live in agents/ at the repo root and load unprefixed through the ~/.claude/agents/claude-shared link that quota-pace/install makes"
     }
   ]
 }

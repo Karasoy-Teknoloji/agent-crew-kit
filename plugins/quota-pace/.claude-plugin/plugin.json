@@ -1,0 +1,8 @@
+{
+  "name": "quota-pace",
+  "version": "0.7.0",
+  "description": "The team's one quota pace: the weekly quota forecast aims to run out N hours (default 5) before the reset; PLENTY/NORMAL/TIGHT mode and the 90%/95% warnings. Included by default (install --free leaves it out): Claude Code cost statistics (API list-price equivalent, local).",
+  "author": {
+    "name": "agent-crew-kit contributors"
+  }
+}

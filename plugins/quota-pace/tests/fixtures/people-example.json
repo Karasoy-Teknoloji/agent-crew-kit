@@ -1,0 +1,9 @@
+{
+  "example-dev-1": {"name": "Emre", "role": "developer"},
+  "example-tester-1": {"name": "Gül Ersoy", "role": "tester"},
+  "example-tester-2": {"name": "Kerem Ali Koç", "role": "tester"},
+  "example-dev-2": {"name": "Onur Demir", "role": "developer"},
+  "example-dev-3": {"name": "Selim Akçay", "role": "developer"},
+  "example-tester-3": {"name": "Hakan Şimşek", "role": "tester"},
+  "example-lead": {"name": "Leyla Aksoy", "role": "manager"}
+}
