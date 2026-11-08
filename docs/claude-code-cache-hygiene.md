@@ -1,6 +1,6 @@
 # Claude Code prompt-cache hygiene
 
-Why this matters: the prompt cache works on prefix matching. If the beginning of a request changes, everything after it can no longer be read from the cache and the whole context is written again, which costs about 10 times more than reading it. The cache hit rate (`önb %NN` in the status line when the optional cost statistics of `quota-pace` are installed, see `plugins/quota-pace/COST.md`) is the share of prompt tokens read from the cache in the main conversation; the number in brackets is the miss count. Aim for above 90%.
+Why this matters: the prompt cache works on prefix matching. If the beginning of a request changes, everything after it can no longer be read from the cache and the whole context is written again, which costs about 10 times more than reading it. The cache hit rate (`cache NN%` in the status line when the optional cost statistics of `quota-pace` are installed, see `plugins/quota-pace/COST.md`) is the share of prompt tokens read from the cache in the main conversation; the number in brackets is the miss count. Aim for above 90%.
 
 ## What breaks the cache
 
