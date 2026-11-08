@@ -16,7 +16,7 @@ Per repo (every worktree of it) it reports:
   BEHIND    local integration branch behind its origin
   STALE     own UNMERGED branch whose first unique commit is older than STALE_DAY (3) working days (Mon-Fri, holidays ignored):
             by team rule it is merged to dev (green) or handed back to the board; shown first, with age and issue number
-            parsed from the branch name ("issue yok" when it has none). Never `personal/*`.
+            parsed from the branch name ("no issue" when it has none). Never `personal/*`.
   CLEANUP   own origin branches already merged and still present (delete candidates; never personal/*, the long-lived
             branch of a personal claude-shared variant)
 Others' commits and branches are counted separately (author names only), never part of the exit code.
@@ -29,10 +29,10 @@ The default root (the folder holding this clone) includes the claude-shared clon
 `personal/*` branches included.
 Read-only, except `--push-unpushed`, which pushes only branches whose unpushed commits are all your own (never someone else's work
 under this machine's credentials). Deleting is limited to what is provably lossless and only with `--clean-lossless` (the daily job): a
-clean linked worktree whose branch tip is an ancestor of origin/<base> or of an origin surum/* / release/* branch or equals
+clean linked worktree whose branch tip is an ancestor of origin/<base> or of an origin release/* branch or equals
 origin/<branch> (pushed; the origin branch stays), and any local branch whose tip is an ancestor of the base or a release branch
 (`git worktree remove` without --force, then `git branch -D` after the check; squash merges are not proof and stay listed). Never the
-main checkout, main/master/dev/test/next, surum/*, release/*, personal/*, yedek/*, someone else's branch, a dirty or locked
+main checkout, main/master/dev/test/next, release/*, personal/*, backup/*, someone else's branch, a dirty or locked
 worktree, or anything touched in the last --clean-idle hours (default 2). Every removal is logged (repo, path, branch, tip SHA) and stored
 in the result cache; everything else stays a report.
 
@@ -250,11 +250,11 @@ STALE_DAY = 3  # an own branch lives at most this many working days (rules/WORKI
 ISSUE_RE = re.compile(r"(?:^|[/#])(?:gh-|issue-)?(\d{1,6})(?=[-_/]|$)")
 BOT_BRANCH = ("dependabot/", "renovate/")
 KEPT_BRANCH = ("main", "master", "dev", "test", "gh-pages")
-KEPT_PREFIX = ("release/", "personal/", "yedek/")
+KEPT_PREFIX = ("release/", "personal/", "backup/")
 
 
 def issue_of(branch):
-    """Issue number in a branch name (`duzeltme/2403-fix` -> 2403, `fix/#17` -> 17), else None. 1-6 digits, at the start
+    """Issue number in a branch name (`fix/2403-fix` -> 2403, `fix/#17` -> 17), else None. 1-6 digits, at the start
     of a path segment (a date like 20261106 or a version `v2` is no issue)."""
     m = ISSUE_RE.search(branch or "")
     return int(m.group(1)) if m else None
@@ -276,11 +276,11 @@ def work_stale(start_ts, now_ts=None):
 
 
 def kept_branch(name):
-    """Branches no job may delete or call stale: the long-lived ones (main/master/dev/test, release/*, personal/*, yedek/*)."""
+    """Branches no job may delete or call stale: the long-lived ones (main/master/dev/test, release/*, personal/*, backup/*)."""
     return name in KEPT_BRANCH or name.startswith(KEPT_PREFIX)
 
 
-def bot_dal(name):
+def bot_branch(name):
     return name.startswith(BOT_BRANCH)
 
 
@@ -488,7 +488,7 @@ def analyse(repo, fetch, fetch_timeout, min_idle=0.0, ignore=(), deep=True, stal
         all_remote = lines(git(repo, "for-each-ref", "--format=%(refname)\t%(authoremail)", "refs/remotes/origin")) if deep else []
 
         def skip(b):
-            return b in PROTECTED or b == base or b == "HEAD" or b.startswith("yedek/")
+            return b in PROTECTED or b == base or b == "HEAD" or b.startswith("backup/")
 
         def keep(b):
             return b.startswith("personal/")  # long-lived personal variant (README "Your own version"), never a delete candidate
@@ -578,7 +578,7 @@ def analyse(repo, fetch, fetch_timeout, min_idle=0.0, ignore=(), deep=True, stal
 # ---- push --------------------------------------------------------------------------------------
 
 def push_unpushed(repo_res, timeout=60):
-    """Push own unpushed feature branches under the same name; diverged -> yedek/<host>-<branch>-<date>. Never force.
+    """Push own unpushed feature branches under the same name; diverged -> backup/<host>-<branch>-<date>. Never force.
     A branch whose unpushed commits include someone else's is not pushed (reported as skipped): this machine's credentials
     must not publish another person's work."""
     repo = RAW_PATH.get(repo_res["path"], repo_res["path"])
@@ -599,7 +599,7 @@ def push_unpushed(repo_res, timeout=60):
             continue
         target = b
         if u["diverged"]:
-            target = f"yedek/{host}-{b.replace('/', '-')}-{stamp}"
+            target = f"backup/{host}-{b.replace('/', '-')}-{stamp}"
             if git(repo, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{target}"):
                 target += time.strftime("-%H%M")
         # no "+" and no --force: a non-fast-forward push is refused by git itself
@@ -613,16 +613,16 @@ def push_unpushed(repo_res, timeout=60):
 # ---- lossless cleanup --------------------------------------------------------------------------
 
 CLEAN_IDLE_H = 2.0   # a worktree or branch touched within this many hours may be in use by an agent: never cleaned
-RELEASE_REFS = ("refs/remotes/origin/surum", "refs/remotes/origin/release")   # origin branches that also count as "already shipped"
+RELEASE_REFS = ("refs/remotes/origin/release",)   # origin branches that also count as "already shipped"
 
 
 def lossless_protected(name):
-    """Branches the cleanup never deletes: the long-lived ones (main/master/dev/test/next, release/*, surum/*, personal/*, yedek/*)."""
-    return name in PROTECTED or kept_branch(name) or name.startswith("surum/")
+    """Branches the cleanup never deletes: the long-lived ones (main/master/dev/test/next, release/*, personal/*, backup/*)."""
+    return name in PROTECTED or kept_branch(name)
 
 
 def contained_in_base(repo, sha, bref):
-    """True when commit `sha` is an ancestor of the repo's base on origin or of any origin surum/* / release/* branch (plain ancestry:
+    """True when commit `sha` is an ancestor of the repo's base on origin or of any origin release/* branch (plain ancestry:
     a squash merge is not proof, so such a branch stays and is only reported)."""
     out = git(repo, "for-each-ref", "--contains", sha, "--format=%(refname)", bref, *RELEASE_REFS)
     return bool(out)
@@ -642,7 +642,7 @@ def newest_touch(wt):
 
 def clean_lossless(repo_res, idle_h=CLEAN_IDLE_H):
     """Remove what cannot lose work: a linked worktree with a clean tree (no changes, no untracked files; ignored files do not count) and
-    then its local branch, when its tip is contained in the base or a surum/*/release/* branch on origin, OR equals origin/<branch>
+    then its local branch, when its tip is contained in the base or a release/* branch on origin, OR equals origin/<branch>
     (pushed: the work is safe on origin and a worktree is only a local checkout; the origin branch stays), and any other local branch
     whose tip is contained in the base or a release branch.
     Never: the main checkout, protected branches (lossless_protected), a branch whose origin copy is someone else's (tip author is not
@@ -688,7 +688,7 @@ def clean_lossless(repo_res, idle_h=CLEAN_IDLE_H):
         done.append({"repo": name, "path": clean(w["path"], 200), "branch": clean(b or "(detached)"), "sha": w["head"], "kind": "worktree",
                      "why": why})
         log("clean repo=%s worktree %s %s %s removed (%s)", clean(repo, 200), clean(w["path"], 200), clean(b or "(detached)"), w["head"],
-            "worktree kaldırıldı (dal origin'de)" if why == "pushed" else "worktree kaldırıldı (base'de)", always=False)
+            "worktree removed (branch is on origin)" if why == "pushed" else "worktree removed (in base)", always=False)
         if b:
             drop_branch(b, w["head"], "worktree gone")
 
@@ -772,11 +772,11 @@ def rows_of(r):
 
 
 def stale_lines(repos, limit=None):
-    """Stale own branches (STALE), oldest first: `repo  branch  Nd (W working days)  issue #N | issue yok`."""
+    """Stale own branches (STALE), oldest first: `repo  branch  Nd (W working days)  issue #N | no issue`."""
     items = sorted(((r, m) for r in repos for m in r["unmerged"] if m["stale"]),
                    key=lambda x: (-x[1]["working_days"], x[0]["repo"], x[1]["branch"]))
     out = [f"  {clean(r['repo'], 40)}  {clean(m['branch'], 60)}  {m['age_days']}d ({m['working_days']} working days, first commit {m['first']})  "
-           + (f"issue #{m['issue']}" if m["issue"] else "issue yok") for r, m in items]
+           + (f"issue #{m['issue']}" if m["issue"] else "no issue") for r, m in items]
     return out[:limit] if limit else out
 
 
@@ -906,9 +906,9 @@ def run():
                     "only when work is at risk, always exit 0")
     ap.add_argument("--budget", type=int, default=8, help="--hook: seconds before the scan stops (default 8)")
     ap.add_argument("--push-unpushed", action="store_true", help="push own unpushed feature branches under the same "
-                    "name (never dev/test/master/main, never force; diverged -> yedek/<host>-<branch>-<date>)")
+                    "name (never dev/test/master/main, never force; diverged -> backup/<host>-<branch>-<date>)")
     ap.add_argument("--clean-lossless", action="store_true", help="remove what cannot lose work: clean linked worktrees and local "
-                    "branches whose tip is already in the base (dev/main) or an origin surum/* / release/* branch (never --force, never "
+                    "branches whose tip is already in the base (dev/main) or an origin release/* branch (never --force, never "
                     "protected or personal branches, never anything touched in the last --clean-idle hours; runs after --push-unpushed)")
     ap.add_argument("--clean-idle", type=float, default=CLEAN_IDLE_H, metavar="H",
                     help="--clean-lossless leaves worktrees and branches touched within H hours alone (default 2)")
@@ -979,7 +979,7 @@ def run():
                 print(("pushed " if p["ok"] else "PUSH FAILED ") + f"{clean(p['repo'], 80)} {clean(p['branch'])} -> origin/{clean(p['pushed_as'])}")
         for c in cleaned:
             print(f"removed {c['kind']} {clean(c['repo'], 80)} {clean(c['branch'])} {c['sha'][:9]}" + (f" ({clean(c['path'], 120)})" if c["path"] else "")
-                  + (" - worktree kaldırıldı (dal origin'de)" if c.get("why") == "pushed" else ""))
+                  + (" - worktree removed (branch is on origin)" if c.get("why") == "pushed" else ""))
         print_table(repos, summ)
     if a.notify and summ["at_risk"]:
         notify(summary_line(summ))
