@@ -22,7 +22,7 @@ class RunoutAt(unittest.TestCase):
     def run_status(self, runout_at, runout_label):
         fc = {"week_resets_at": self.reset, "updated": self.now, "p10": 100.0, "p50": 104.0, "p90": 108.0, "rate": 0.8,
               "active_hours_left": 5.0, "mode_reason": "test", "target_at": self.reset - 5 * 3600, "target_hours": 5.0,
-              "runout_at": runout_at, "runout_label": runout_label, "idle_label": "15dk" if runout_label else None, "mode": "TIGHT"}
+              "runout_at": runout_at, "runout_label": runout_label, "idle_label": "15m" if runout_label else None, "mode": "TIGHT"}
         with open(os.path.join(self.claude, "pace-forecast.json"), "w", encoding="utf-8") as f:
             json.dump(fc, f)
         data = json.dumps({"model": {"display_name": "X", "id": "x"}, "workspace": {"current_dir": "/"}, "rate_limits": {

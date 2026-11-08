@@ -1,6 +1,6 @@
 ﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $raw = [Console]::In.ReadToEnd()
-$inv = [Globalization.CultureInfo]::InvariantCulture   # numbers are never formatted with the machine's culture (Turkish Windows would print 1,2M)
+$inv = [Globalization.CultureInfo]::InvariantCulture   # numbers are never formatted with the machine's culture (a Turkish-locale Windows would print 1,2M)
 $d = $raw | ConvertFrom-Json
 # Live-session guard: only a payload from a live Claude Code session may write the live state (pace.json, pace-history.csv, the stdin dump,
 # forecast and share jobs). ~/.claude/sessions/<pid>.json lists the live sessions; a payload whose session_id is not in it (a test fixture or a
@@ -62,17 +62,17 @@ if ($null -ne $cw.used_percentage) {
     if ($acwN -gt 0 -and ($size -le 0 -or $acwN -lt $size)) { $size = $acwN }
     $pct = if ($size -gt 0) { [int](100 * $used / $size) } else { [int]$cw.used_percentage }
     $fmt = { param($n) if ($n -ge 1000000) { ($n / 1000000).ToString('0.#', $inv) + 'M' } else { ($n / 1000).ToString('0', $inv) + 'K' } }
-    $out += " | %$pct ($(& $fmt $used)/$(& $fmt $size))"
+    $out += " | $pct% ($(& $fmt $used)/$(& $fmt $size))"
 }
 # Optional cost statistics (installed by `install.ps1`, see COST.md): off unless bin/cost.py exists next to this script
-# (~/.claude/bin for the copied install, plugins/quota-pace/bin when run from the claude-shared clone, install.ps1 -Repodan); turn off without
-# uninstalling with COST_STATUS=0 or the file ~/.claude/cost/kapali. "session", the last action's cost and the rolling windows come
+# (~/.claude/bin for the copied install, plugins/quota-pace/bin when run from the claude-shared clone, install.ps1 -Direct); turn off without
+# uninstalling with COST_STATUS=0 or the file ~/.claude/cost/off. "session", the last action's cost and the rolling windows come
 # from ONE `cost.py --status --input` call (it reads this JSON from stdin, keeps the per-prompt baseline and formats the lira
-# amounts): the same single source statusline.sh uses, no second copy of that logic here. Lines: 0 windows, 1 oturum, 2 last action.
+# amounts): the same single source statusline.sh uses, no second copy of that logic here. Lines: 0 windows, 1 session, 2 last action.
 $costPy = "$PSScriptRoot/bin/cost.py"
-$mal = (Test-Path $costPy) -and $env:COST_STATUS -ne '0' -and -not (Test-Path "$env:USERPROFILE/.claude/cost/kapali")
-$malLine = @()
-if ($mal) {
+$costOn = (Test-Path $costPy) -and $env:COST_STATUS -ne '0' -and -not (Test-Path "$env:USERPROFILE/.claude/cost/off")
+$costLine = @()
+if ($costOn) {
     # python.exe as recorded by the installer (cost.cmd, under ~/.claude/bin in both install modes), never the WindowsApps stub
     try {
         $pyExe = $env:COST_PYTHON
@@ -88,13 +88,13 @@ if ($mal) {
         }
         if ($pyExe) {
             $OutputEncoding = New-Object Text.UTF8Encoding $false   # what the pipe to python carries (5.1 default is ASCII)
-            $malLine = @($raw | & $pyExe -S -E $costPy --status --input 2>$null)
+            $costLine = @($raw | & $pyExe -S -E $costPy --status --input 2>$null)
         }
     } catch {}
 }
 $out += ' | ' + (Get-Date -Format 'HH:mm')
 # QUOTA_OPERATION_AMOUNT=0 hides the last action's amounts after the clock (personal preference, default shown)
-if ($env:QUOTA_OPERATION_AMOUNT -ne '0' -and $malLine.Count -gt 2 -and $malLine[2]) { $out += ' ' + $malLine[2] }
+if ($env:QUOTA_OPERATION_AMOUNT -ne '0' -and $costLine.Count -gt 2 -and $costLine[2]) { $out += ' ' + $costLine[2] }
 # Quota pace: where the weekly limit lands at the forecast target (reset minus PACE_TARGET_HOURS hours, default 5; 0 = the reset) -> PLENTY / NORMAL / TIGHT (written to pace.json for the hook). The mode is weekly only; the 5-hour window is displayed, never part of it.
 # bin/pace_forecast.py gives the median and a P10-P90 range from the active rate and the remaining work hours;
 # used / share of the week elapsed is the fallback while there is no fresh forecast.
@@ -120,9 +120,9 @@ function Get-Forecast5h {
     $p = $u + $rate * ($r - $now)
     if ($p -ge 100) {
         $tb = [long][Math]::Floor($now + (100 - $u) / $rate)
-        return ([string][char]0x2192) + 'biti' + [char]0x015F + ' ' + [DateTimeOffset]::FromUnixTimeSeconds($tb).ToLocalTime().ToString('HH:mm')
+        return ([string][char]0x2192) + 'out ' + [DateTimeOffset]::FromUnixTimeSeconds($tb).ToLocalTime().ToString('HH:mm')
     }
-    return ([string][char]0x2192) + '%' + [int][Math]::Floor($p)
+    return ([string][char]0x2192) + [int][Math]::Floor($p) + '%'
 }
 $rl = $d.rate_limits
 $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -162,23 +162,23 @@ if ($r7ok) {
         $mode = [string]$fc.mode
         foreach ($k in 'p10', 'p50', 'p90', 'rate', 'active_hours_left', 'mode_reason', 'runout_at', 'runout_label', 'idle_label', 'target_at', 'target_hours', 'target_percent') { $pj[$k] = $fc.$k }
         # past 100%: when the limit runs out and how long it stays empty before the reset
-        if ($fc.runout_label) { $runout = "bitiş $($fc.runout_label) ($($fc.idle_label) boş)" }
+        if ($fc.runout_label) { $runout = "out $($fc.runout_label) ($($fc.idle_label) empty)" }
     }
     $pj.week_projected = $proj; $pj.mode = $mode
     $r5 = ''
     if ($r5at -gt 0) {
         $left = [Math]::Max($r5at - $now, 0)
         $h = [Math]::Floor($left / 3600); $m = [Math]::Floor(($left % 3600) / 60)
-        $r5 = if ($h -gt 0) { " (${h}sa${m}dk)" } else { " (${m}dk)" }
+        $r5 = if ($h -gt 0) { " (${h}h${m}m)" } else { " (${m}m)" }
     }
     $f5 = ''
     if ($has5 -and $r5at -gt 0) { $f5 = Get-Forecast5h -now $now -r $r5at -u $u5 -hist "$claude/pace-history.csv" }
     # Mode as one symbol: green PLENTY, yellow NORMAL, red TIGHT
     $code = @{ PLENTY = 0x1F7E2; NORMAL = 0x1F7E1; TIGHT = 0x1F534 }[$mode]
     $sym = if ($code) { [char]::ConvertFromUtf32($code) } else { $mode }
-    # The 5sa segment is shown only while Claude Code reports a 5-hour window
-    $seg5 = if ($has5) { "5sa %$([int][Math]::Floor($u5))$f5$r5 · " } else { '' }
-    $out += " | ${seg5}hafta %$([int][Math]::Floor($u7))→$(if ($runout) { $runout } else { "%$proj$range" }) $sym"
+    # The 5h segment is shown only while Claude Code reports a 5-hour window
+    $seg5 = if ($has5) { "5h $([int][Math]::Floor($u5))%$f5$r5 · " } else { '' }
+    $out += " | ${seg5}week $([int][Math]::Floor($u7))%→$(if ($runout) { $runout } else { "$proj%$range" }) $sym"
     # History for the forecast: one row when a value changes, else every 10 minutes (no tokens)
     $lastLog = if ($prev -and $prev.logged_at) { [long]$prev.logged_at } else { 0 }
     try {
@@ -199,11 +199,11 @@ if ($r7ok) {
             $lock = Get-Item "$claude/pace-forecast.lock" -ErrorAction SilentlyContinue
             if (-not $lock -or ((Get-Date) - $lock.LastWriteTime).TotalSeconds -ge 120) {
                 # Single hidden-launch path: tools/hidden.ps1 (see the share block below); without the helper the refresh is skipped.
-                if (-not $gz) { $gz = @("$PSScriptRoot/../../tools/hidden.ps1", "$PSScriptRoot/bin/hidden.ps1") | Where-Object { Test-Path $_ } | Select-Object -First 1 }
-                if ($gz) {
-                    . $gz
+                if (-not $hiddenPs1) { $hiddenPs1 = @("$PSScriptRoot/../../tools/hidden.ps1", "$PSScriptRoot/bin/hidden.ps1") | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+                if ($hiddenPs1) {
+                    . $hiddenPs1
                     $pyw = (Get-Command pythonw -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-                    if ($pyw) { $p = Start-GizliSurec -Exe $pyw -Argument "`"$fcPy`"" -PassThru; if ($p) { $p.PriorityClass = 'Idle' } }
+                    if ($pyw) { $p = Start-HiddenProcess -Exe $pyw -Argument "`"$fcPy`"" -PassThru; if ($p) { $p.PriorityClass = 'Idle' } }
                 }
             }
         } catch {}
@@ -212,29 +212,29 @@ if ($r7ok) {
     # the marker ~/.claude/cost/share-following, whose LastWriteTime is the next due time (the job re-aims it after every check from
     # share_interval_hour in pace-plan.json, default 2 h). Only a joined machine (~/.config/claude-shared/plan) and only when due do we
     # look at the lock (a share younger than 30 min is still running). Started hidden and never waited for.
-    if ($live -and $mal -and $pyExe -and $env:QUOTA_SHARE_AUTO -ne '0' -and (Test-Path "$PSScriptRoot/bin/cost_share.py")) {
+    if ($live -and $costOn -and $pyExe -and $env:QUOTA_SHARE_AUTO -ne '0' -and (Test-Path "$PSScriptRoot/bin/cost_share.py")) {
         try {
             $due = Get-Item "$claude/cost/share-following" -ErrorAction SilentlyContinue
             if ((-not $due -or $due.LastWriteTimeUtc -le [DateTime]::UtcNow) -and (Test-Path "$env:USERPROFILE/.config/claude-shared/plan")) {
-                $pl = Get-Item "$claude/cost/paylas.lock" -ErrorAction SilentlyContinue
+                $pl = Get-Item "$claude/cost/share.lock" -ErrorAction SilentlyContinue
                 if (-not $pl -or ([DateTime]::UtcNow - $pl.LastWriteTimeUtc).TotalSeconds -ge 1800) {
                     # tools/hidden.ps1 (headless conhost): Start-Process python.exe -WindowStyle Hidden still creates a console window each time.
                     # Repo layout: ../../tools/hidden.ps1; a --copy install ships it as bin/hidden.ps1.
-                    if (-not $gz) { $gz = @("$PSScriptRoot/../../tools/hidden.ps1", "$PSScriptRoot/bin/hidden.ps1") | Where-Object { Test-Path $_ } | Select-Object -First 1 }
-                    if ($gz) { . $gz; Start-GizliSurec -Exe $pyExe -Argument "-E `"$PSScriptRoot/bin/cost.py`" --share --automatic" }
+                    if (-not $hiddenPs1) { $hiddenPs1 = @("$PSScriptRoot/../../tools/hidden.ps1", "$PSScriptRoot/bin/hidden.ps1") | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+                    if ($hiddenPs1) { . $hiddenPs1; Start-HiddenProcess -Exe $pyExe -Argument "-E `"$PSScriptRoot/bin/cost.py`" --share --automatic" }
                 }
             }
         } catch {}
     }
 }
-# Slack inbox (tools/slack-triage/gelen.py, install --slack-inbox): " | Slack: N yeni" while unread items wait. Reads the inbox file and its
-# .okundu byte offset directly (no Python spawn, no network, at most 256 KB); a missing file or any error shows nothing.
+# Slack inbox (tools/slack-triage/inbox.py, install --slack-inbox): " | Slack: N new" while unread items wait. Reads the inbox file and its
+# .seen byte offset directly (no Python spawn, no network, at most 256 KB); a missing file or any error shows nothing.
 try {
     $sgIn = if ($env:SLACK_INBOX_INBOX) { $env:SLACK_INBOX_INBOX } else { "$env:USERPROFILE/.claude/slack-inbox.jsonl" }
     $sgLen = if (Test-Path -LiteralPath $sgIn) { (New-Object IO.FileInfo $sgIn).Length } else { 0 }
     if ($sgLen -gt 0) {
         $sgOff = [long]0
-        if (Test-Path -LiteralPath "$sgIn.okundu") { [void][long]::TryParse(([IO.File]::ReadAllText("$sgIn.okundu")).Trim(), [ref]$sgOff) }
+        if (Test-Path -LiteralPath "$sgIn.seen") { [void][long]::TryParse(([IO.File]::ReadAllText("$sgIn.seen")).Trim(), [ref]$sgOff) }
         if ($sgLen -gt $sgOff) {
             $fs = [IO.File]::Open($sgIn, 'Open', 'Read', 'ReadWrite')
             try {
@@ -243,7 +243,7 @@ try {
                 $got = $fs.Read($buf, 0, $buf.Length)
             } finally { $fs.Dispose() }
             $sgN = @([Text.Encoding]::UTF8.GetString($buf, 0, $got) -split "`n" | Where-Object { $_.Trim() }).Count
-            if ($sgN -gt 0) { $out += " | Slack: $sgN yeni" }
+            if ($sgN -gt 0) { $out += " | Slack: $sgN new" }
         }
     }
 } catch {}
@@ -280,17 +280,17 @@ if ($dirFwd -ieq $homeFwd) {
         $out += " | $dir"
     }
 }
-# Cost segments (same as statusline.sh): cache hit rate, oturum, rolling windows.
-if ($mal) {
-    # prompt cache hit rate of the main conversation (status-line JSON prompt_cache, Claude Code >= 2.1.251): "önb %NN", misses in brackets
+# Cost segments (same as statusline.sh): cache hit rate, session, rolling windows.
+if ($costOn) {
+    # prompt cache hit rate of the main conversation (status-line JSON prompt_cache, Claude Code >= 2.1.251): "cache NN%", misses in brackets
     if ($null -ne $d.prompt_cache -and $null -ne $d.prompt_cache.hit_ratio) {
-        $out += " | önb %" + [int][Math]::Floor([double]$d.prompt_cache.hit_ratio * 100 + 0.5)
+        $out += " | cache " + [int][Math]::Floor([double]$d.prompt_cache.hit_ratio * 100 + 0.5) + "%"
         $miss = if ($null -ne $d.prompt_cache.misses) { [int]$d.prompt_cache.misses } else { 0 }
-        if ($miss -gt 0) { $out += " ($miss kaçış)" }
+        if ($miss -gt 0) { $out += " ($miss misses)" }
     }
-    # "oturum ₺X": cost.total_cost_usd from the status-line JSON (resets to 0 on /clear)
-    if ($malLine.Count -gt 1 -and $malLine[1]) { $out += ' | oturum ' + $malLine[1] }
-    # "son 24sa ₺A (₺a) · 7g ₺B $C (₺b) · 30g ₺D (₺d) · ×N": rolling windows (reads durum.cache only; starts the background refresh when it is old)
-    if ($malLine.Count -gt 0 -and $malLine[0]) { $out += ' | ' + $malLine[0] }
+    # "session ₺X": cost.total_cost_usd from the status-line JSON (resets to 0 on /clear)
+    if ($costLine.Count -gt 1 -and $costLine[1]) { $out += ' | session ' + $costLine[1] }
+    # "last 24h ₺A (₺a) · 7d ₺B $C (₺b) · 30d ₺D (₺d) · ×N": rolling windows (reads status.cache only; starts the background refresh when it is old)
+    if ($costLine.Count -gt 0 -and $costLine[0]) { $out += ' | ' + $costLine[0] }
 }
 $out

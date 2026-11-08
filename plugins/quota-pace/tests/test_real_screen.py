@@ -11,14 +11,14 @@ QUOTA_UI_OUTPUT=<folder> to keep the screen dumps (otherwise they are only print
 
 What it does NOT touch: the live ~/.claude/settings.json (the session loads only project/local settings plus a temporary --settings file that sets
 the statusLine and the bypass-permissions mode), other running claude processes, the real wrapper's state files: pace.json, pace-history.csv,
-pace-forecast.*, cost/durum.* are copied to a temp folder before the end-to-end tests run the real wrapper and put back afterwards (SHA-256
+pace-forecast.*, cost/status.* are copied to a temp folder before the end-to-end tests run the real wrapper and put back afterwards (SHA-256
 compared; anything a developer's own live session wrote in that window is overwritten too, so run it while no other session is busy). Side effects that
 remain: the cwd (%TEMP%\\quota-ui-cwd) gets a project entry in ~/.claude.json, and every session leaves a transcript under ~/.claude/projects and
 /exit etc. in the prompt history. The renderer is forced with CLAUDE_CODE_NO_FLICKER so killed test sessions do not count as "fullscreen failed
 to start" strikes (~/.claude.json fullscreenBootStrikes; /tui fullscreen clears a strike-out). Startup dialogs: the harness answers only the two
 it knows (external CLAUDE.md imports -> Enter = "No"; trust folder -> Enter) and fails on anything else, never guessing.
 
-Measured at Claude Code 2.1.310 / Windows 11 (details in INSTALL.md, "Satir sarma: olculen kenar payi"): COLUMNS and LINES equal the pty size; Claude
+Measured at Claude Code 2.1.310 / Windows 11 (details in INSTALL.md, "Line wrapping: the measured margin"): COLUMNS and LINES equal the pty size; Claude
 Code never wraps a status line row, it cuts it with an ellipsis; a row shows at most width - 4 cells (2 cells indent on the left, 2 empty on the
 right) plus 2 per unit of settings.json statusLine.padding; a resize alone does not re-run the command (the next event does, with the new COLUMNS).
 """
@@ -258,7 +258,7 @@ def measure(e, prob, text, wait=15):
 HOME_CLAUDE = os.path.join(os.path.expanduser("~"), ".claude")
 SHIM = r'''
 import json, os, subprocess, sys
-wrap, over, ek = sys.argv[1], sys.argv[2], sys.argv[3]
+wrap, over, extra = sys.argv[1], sys.argv[2], sys.argv[3]
 import time
 LOG = os.path.join(os.path.dirname(over), "shim-log.jsonl")
 d = json.loads(sys.stdin.buffer.read().decode("utf-8") or "{}")
@@ -269,7 +269,7 @@ for k, v in o.items():
         d[k].update(v)
     else:
         d[k] = v
-cmd = ["pwsh", "-NoProfile", "-File", wrap, "-StatusLine", sl, "-Ek", ek]
+cmd = ["pwsh", "-NoProfile", "-File", wrap, "-StatusLine", sl, "-Extra", extra]
 r = subprocess.run(cmd, input=json.dumps(d).encode("utf-8"), capture_output=True)
 out = r.stdout.rstrip(b"\r\n").replace(b"\r\n", b"\n")
 with open(LOG, "a", encoding="utf-8") as lf:
@@ -286,7 +286,7 @@ def _read(p):
 
 
 class Guard:
-    """Copies the live state files the real status line writes (pace.json, pace-history.csv, pace-forecast.*, cost/durum.*) and puts them
+    """Copies the live state files the real status line writes (pace.json, pace-history.csv, pace-forecast.*, cost/status.*) and puts them
     back on exit; `changing` lists what had changed (also by a developer's own live session, which writes them too)."""
     FILES = ["pace.json", "pace-history.csv", "pace-forecast.json", "pace-forecast.lock", "pace-forecast.log", "pace-announced.json", "pace-activity.json",
                 os.path.join("cost", "status.cache"), os.path.join("cost", "status.line"), os.path.join("cost", "status.lock"),
@@ -332,7 +332,7 @@ class Guard:
 
 
 WRAP = os.path.join(PLUG, "bin", "statusline-local.ps1")
-EK = os.path.join(HOME_CLAUDE, "bin", "statusline-ek.ps1")
+EXTRA = os.path.join(HOME_CLAUDE, "bin", "statusline-extra.ps1")
 
 
 def default_pay():
@@ -379,9 +379,9 @@ class Real:
         self.setting = os.path.join(self.dir, "settings.json")
         with open(self.shim, "w", encoding="utf-8") as f:
             f.write(SHIM)
-        self.ek = EK if os.path.isfile(EK) and os.environ.get("QUOTA_UI_EXTRA") != "0" else os.path.join(self.dir, "yok-ek.ps1")
+        self.extra = EXTRA if os.path.isfile(EXTRA) and os.environ.get("QUOTA_UI_EXTRA") != "0" else os.path.join(self.dir, "no-extra.ps1")
         self.model(model_name, dir_)
-        self.argv = [sys.executable, self.shim, WRAP, self.over, self.ek]
+        self.argv = [sys.executable, self.shim, WRAP, self.over, self.extra]
         self.command = " ".join(x.replace("\\", "/") for x in self.argv)
         write_setting(self.setting, {"type": "command", "command": self.command})
 
@@ -397,7 +397,7 @@ class Real:
             return []
 
     def direct(self, width, **env):
-        """Run the same command outside Claude Code at COLUMNS=genislik (the reference output); returns the list of lines."""
+        """Run the same command outside Claude Code at COLUMNS=width (the reference output); returns the list of lines."""
         e = {k: v for k, v in os.environ.items() if not re.match(r"(CLAUDE|QUOTA_|COLUMNS$)", k)}
         e.update(env, COLUMNS=str(width))
         r = subprocess.run(self.argv, input=b"{}", capture_output=True, env=e, timeout=120)
@@ -514,7 +514,7 @@ class RealScreen(unittest.TestCase):
                 l, upper = en_big_l(e, p, n)
                 print("width %3d %-9s: largest whole line %3d cells -> margin %d (L+1 gives: %s) | wrapper default margin %d"
                       % (n, rn, l, n - l, [(s[1], s[2], s[0][-4:]) for _, s in upper], pay))
-                self.assertEqual(n - l, pay, "measured margin != wrapper default QUOTA_LINE_PAY")
+                self.assertEqual(n - l, pay, "measured margin != wrapper default QUOTA_LINE_MARGIN")
                 e.off()
         p = Prob(padding=2, refresh=1)                                             # settings.json padding counts on both sides: 2 per unit
         self.addCleanup(p.clean)
@@ -567,7 +567,7 @@ class RealScreen(unittest.TestCase):
                 self.assertEqual(" | ".join(s[0].strip() for _, s in rows), " | ".join(output.split("\n")))    # nothing lost
                 e.off()
             g.model("S" * pin[limit], short)                                        # the old default (10): this same 200-cell line wrapped although it fits
-            e = self._session(g.setting, n, env={"QUOTA_LINE_PAY": "10"})
+            e = self._session(g.setting, n, env={"QUOTA_LINE_MARGIN": "10"})
             rows = wait_status(e)
             print("\n== the %d-cell line with the old margin 10: %d row(s)\n%s" % (limit, len(rows), screen_summary([s for _, s in rows])))
             e.off()

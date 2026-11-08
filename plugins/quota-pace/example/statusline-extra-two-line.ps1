@@ -2,7 +2,7 @@
 # split at the folder segment regardless of width; it still works (its two lines are wrapped further if they are too long for the terminal).
 # Optional personal hook for statusline-local.ps1 (Windows): splits the status line in two so it fits narrow terminals.
 # Line 1: model, context, time, quota. Line 2: from the branch/folder segment on (folder, cache, cost).
-# Install: copy to %USERPROFILE%\.claude\bin\statusline-ek.ps1 (the installer never touches that file).
+# Install: copy to %USERPROFILE%\.claude\bin\statusline-extra.ps1 (the installer never touches that file).
 param([string]$Line)
 $part = $Line -split ' \| '
 $i = 0

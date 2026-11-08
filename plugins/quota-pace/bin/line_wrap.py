@@ -1,7 +1,7 @@
 """Width-based wrapping of the status line for statusline.sh (Linux/macOS): the same rule as statusline-local.ps1 (Windows).
 stdin = the status line text, stdout = the same text, broken when a row is wider than the usable width.
 Breaks fall at " | " first; a segment that does not fit is split at its " · " parts and filled greedily. A piece is never cut. Width: QUOTA_LINE_WIDTH (manual) > COLUMNS (Claude Code sets it for the status-line process) >
-the controlling terminal (/dev/tty); none of them known = no wrapping. Margin: QUOTA_LINE_PAY, else 4 (measured Claude Code margin)
+the controlling terminal (/dev/tty); none of them known = no wrapping. Margin: QUOTA_LINE_MARGIN, else 4 (measured Claude Code margin)
 + 2 x settings.json statusLine.padding. Usage: line_wrap.py [claude dir]   (default ~/.claude, only used for settings.json)"""
 import json
 import os
@@ -50,8 +50,8 @@ def width():
 
 
 def pay(dir_):
-    if re.fullmatch(r"\d{1,3}", (os.environ.get("QUOTA_LINE_PAY") or "").strip()):
-        return int(os.environ["QUOTA_LINE_PAY"].strip())
+    if re.fullmatch(r"\d{1,3}", (os.environ.get("QUOTA_LINE_MARGIN") or "").strip()):
+        return int(os.environ["QUOTA_LINE_MARGIN"].strip())
     try:
         with open(os.path.join(dir_, "settings.json"), encoding="utf-8-sig") as f:
             pd = json.load(f).get("statusLine", {}).get("padding")

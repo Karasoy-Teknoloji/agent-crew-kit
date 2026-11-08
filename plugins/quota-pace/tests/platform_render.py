@@ -24,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PLUG = os.path.normpath(os.path.join(HERE, ".."))
 FIX = os.path.join(HERE, "fixtures")
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-EN_DAYS = re.compile(r"\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b")
+TR_DAYS = re.compile(r"\b(Pzt|Sal|Çar|Per|Cum|Cmt|Paz)\b")   # the old Turkish day names must not come back
 
 
 def run(cmd, env, stdin=None, timeout=900):
@@ -84,14 +84,14 @@ def main():
 
     # 2. data the segments need: a lira rate, the calibration, local transcripts (for the windows and the agent row), pace history
     now = int(time.time())
-    mal = os.path.join(claude, "cost")
-    os.makedirs(mal, exist_ok=True)
+    cost_dir = os.path.join(claude, "cost")
+    os.makedirs(cost_dir, exist_ok=True)
     proj = os.path.join(claude, "projects", "fixture-project")
     transcript = os.path.join(proj, "sess-fixture-0001.jsonl")
     agent = os.path.join(proj, "sess-fixture-0001", "subagents", "agent-fx1.jsonl")
     os.makedirs(os.path.dirname(agent), exist_ok=True)
     with open(transcript, "w", encoding="utf-8") as f:
-        f.write(assistant_line("big", 440_000_000, now - 3600))          # $1,760 at the Opus 5.5 input price: a 4-digit 7g amount
+        f.write(assistant_line("big", 440_000_000, now - 3600))          # $1,760 at the Opus 5.5 input price: a 4-digit 7d amount
         f.write(json.dumps({"type": "user", "isSidechain": False, "message": {"role": "user", "content": "fixture prompt"}}) + "\n")
         f.write(assistant_line("turn", 201_250, now - 600))              # the last action: $0.805 = ₺40,25 at 50 TL/USD, main session only
     with open(agent, "w", encoding="utf-8") as f:
@@ -99,10 +99,10 @@ def main():
     py = sys.executable
     rc, out, err = run([py, "-I", os.path.join(claude, "bin", "cost.py"), "--save"], env)
     check(rc == 0, "cost --save on the fixture transcripts (rc %d)" % rc)
-    with open(os.path.join(mal, "install.json"), "w", encoding="utf-8") as f:
-        json.dump({"install": 50.0, "t": now}, f)
-    with open(os.path.join(mal, "ratio.json"), "w", encoding="utf-8") as f:
-        json.dump({"t": now, "coefficient": 0.05}, f)                        # gercek = API x 0.05
+    with open(os.path.join(cost_dir, "fx.json"), "w", encoding="utf-8") as f:
+        json.dump({"rate": 50.0, "t": now}, f)
+    with open(os.path.join(cost_dir, "ratio.json"), "w", encoding="utf-8") as f:
+        json.dump({"t": now, "coefficient": 0.05}, f)                        # real = API x 0.05
     r5, r7 = now + 3600, now + 3 * 86400
     with open(os.path.join(claude, "pace-history.csv"), "w", encoding="utf-8") as f:   # 5h window: 0 % an hour ago, 60 % now -> runs out before the reset
         f.write("ts,week_used,five_hour_used,week_resets_at,five_hour_resets_at,host\n")
@@ -121,7 +121,7 @@ def main():
     if os.environ.get("PLATFORM_RENDER_SHELL"):                          # e.g. powershell.exe: the same script under Windows PowerShell 5.1
         main_cmd[0] = os.environ["PLATFORM_RENDER_SHELL"]
     run(main_cmd, env, fixture("statusline-input.json", 22.0))           # first sighting of the prompt: the baseline is stored
-    rc, out, err = run(main_cmd, env, fixture("statusline-input.json"))  # the last action comes from the main transcript: $0.805 = ₺40,25 at 50 TL/USD (gercek x 0.05 = ₺2,01); the total_cost_usd delta of the same prompt (+0.805) is the first window "son Ns" (seconds in the first minute)
+    rc, out, err = run(main_cmd, env, fixture("statusline-input.json"))  # the last action comes from the main transcript: $0.805 = ₺40,25 at 50 TL/USD (real x 0.05 = ₺2,01); the total_cost_usd delta of the same prompt (+0.805) is the first window "last Ns" (seconds in the first minute)
     line = ANSI.sub("", out).strip()
     print(line)
     if err.strip():
@@ -130,20 +130,20 @@ def main():
     check("\n" not in line, "one line (no wrapping at COLUMNS=400)")
     segs = {
         "model and effort": r"^Opus 5\.5 · high(?!\*)",
-        "context %15 (155K/1M)": r"\| %15 \(155K/1M\) \|",
+        "context 15% (155K/1M)": r"\| 15% \(155K/1M\) \|",
         "clock": r"\| \d\d:\d\d ",
         "last action: lira amount, real cost in parentheses": r"\d\d:\d\d ₺40,25 \(₺2,01\) \|",
-        "first window: son Ndk (this session incl. agents)": r"\| son \d+sn ₺40,25 \(₺2,01\) · son 24sa ",
-        "5h segment with a forecast time (→bitiş HH:MM)": r"5sa %60→bitiş \d\d:\d\d \(\d+(sa\d+)?dk\)",
-        "weekly segment with the mode symbol": r"hafta %63→%\d+(±\d+)? (🟢|🟡|🔴)",
+        "first window: last Nm (this session incl. agents)": r"\| last \d+s ₺40,25 \(₺2,01\) · last 24h ",
+        "5h segment with a forecast time (→out HH:MM)": r"5h 60%→out \d\d:\d\d \(\d+(h\d+)?m\)",
+        "weekly segment with the mode symbol": r"week 63%→\d+%(±\d+)? (🟢|🟡|🔴)",
         "folder": r"\| ~$|\| ~ \|",
-        "cache hit rate": r"önb %94 \(2 kaçış\)",
-        "oturum in lira, real cost in parentheses": r"oturum ₺1\.140 \(₺57,01\) \|",
-        "rolling windows, real cost in parentheses, 7g also in dollars (no parentheses)": r"son 24sa ₺[\d.]+ \(₺[\d.,]+\) · 7g ₺[\d.]+ \$[\d.]+ \(₺[\d.,]+\) · 30g ₺[\d.]+ \(₺[\d.,]+\) · ×20$",
+        "cache hit rate": r"cache 94% \(2 misses\)",
+        "session in lira, real cost in parentheses": r"session ₺1\.140 \(₺57,01\) \|",
+        "rolling windows, real cost in parentheses, 7d also in dollars (no parentheses)": r"last 24h ₺[\d.]+ \(₺[\d.,]+\) · 7d ₺[\d.]+ \$[\d.]+ \(₺[\d.,]+\) · 30d ₺[\d.]+ \(₺[\d.,]+\) · ×20$",
     }
     for what, rx in segs.items():
         check(re.search(rx, line) is not None, what)
-    check(EN_DAYS.search(line) is None, "no English day names")
+    check(TR_DAYS.search(line) is None, "no Turkish day names")
 
     # 4. sub-agent row
     print("\nSub-agent row:")
@@ -155,14 +155,14 @@ def main():
     check(rc == 0 and len(rows) == 1 and rows[0].get("id") == "fx1", "one row for the fixture task")
     check(row.startswith("Fixture task: check the backup chain · senior-developer-oh · 68k"), "task, agent type and tokens")
     check(re.search(r"· ₺200 \(₺10,00\) · ", row) is not None or re.search(r"· ₺[\d.,]+ \(₺[\d.,]+\) · ", row) is not None, "agent cost in lira with the real cost in parentheses")
-    check(re.search(r"· \d+(sn|dk)( \d+sn)?$", row) is not None, "elapsed time")
+    check(re.search(r"· \d+(s|m)( \d+s)?$", row) is not None, "elapsed time")
 
     for name in ("statusline-input.json", "subagent-statusline-input.json"):
         check(os.path.isfile(os.path.join(claude, name)), "stdin dump %s written" % name)
 
     if not args.keep and not args.scratch:
         shutil.rmtree(home, ignore_errors=True)
-    print("\n%s" % ("TUMU TAMAM" if not failures else "EKSIK: " + "; ".join(failures)))
+    print("\n%s" % ("ALL OK" if not failures else "MISSING: " + "; ".join(failures)))
     return 1 if failures else 0
 
 

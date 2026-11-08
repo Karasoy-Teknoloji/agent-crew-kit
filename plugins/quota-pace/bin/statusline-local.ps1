@@ -1,24 +1,26 @@
-﻿# Durum çubuğu sarmalayıcısı (quota-pace): Python yolunu düzeltir, sonra statusline.ps1'i çalıştırır.
-# Neden: pace_forecast.py arka planda `pythonw` ile başlar; pythonw PATH'te yoksa tahmin sessizce güncellenmez.
-# statusline.ps1 AYNI süreçte çalışır (ikinci bir pwsh başlatılmaz: pwsh açılışı bu satırın en pahalı kısmıdır).
-# Kişiye özel uyarılar için isteğe bağlı %USERPROFILE%\.claude\bin\statusline-ek.ps1 yazın: param([string]$Line), değiştirilmiş satırı döndürür;
-# install.ps1 o dosyaya dokunmaz.
-# settings.json statusLine komutu bu betiği çağırır:
-#   pwsh -NoProfile -File C:\Users\KULLANICI\.claude\bin\statusline-local.ps1
-# Yollar parametredir. statusline.ps1 bu betiğin bir üst klasöründedir (kopya kurulumda ~/.claude, depodan çalışmada plugins/quota-pace);
-# ClaudeDir (settings.json, kişisel statusline-ek.ps1) her iki durumda %USERPROFILE%\.claude'dur.
-# Satır sarma: tüm bölümler terminal genişliğine sığıyorsa TEK satır (eskisiyle aynı bayt), sığmıyorsa önce bölüm sınırlarında (" | "), sığmayan bölümü " · " kısımlarında bölerek açgözlü ikinci
-# (gerekirse üçüncü) satıra geçer; hiçbir kısım kesilmez/bölünmez. Genişlik: QUOTA_LINE_WIDTH (elle) > COLUMNS (Claude Code durum çubuğu
-# sürecine verir; Windows'ta [Console]::WindowWidth ve `mode con` yönlendirilmiş stdio'da yanlış/hatalı) > 120. Kenar payı: QUOTA_LINE_PAY (varsayılan 4 = ölçülen
-# Claude Code payı, + settings.json statusLine.padding x 2). Sarma statusline-ek.ps1 çıktısından SONRA yapılır (kişisel uyarılar da hesaba girer).
+﻿# Status line wrapper (quota-pace): fixes the Python path, then runs statusline.ps1.
+# Why: pace_forecast.py starts in the background with `pythonw`; when pythonw is not on PATH the forecast silently stops updating.
+# statusline.ps1 runs in the SAME process (no second pwsh is started: starting pwsh is the most expensive part of this line).
+# For personal warnings write an optional %USERPROFILE%\.claude\bin\statusline-extra.ps1: param([string]$Line), returns the changed line;
+# install.ps1 never touches that file.
+# The settings.json statusLine command calls this script:
+#   pwsh -NoProfile -File C:\Users\USER\.claude\bin\statusline-local.ps1
+# The paths are parameters. statusline.ps1 sits one folder above this script (~/.claude in a copy install, plugins/quota-pace when run
+# from the clone); ClaudeDir (settings.json, the personal statusline-extra.ps1) is %USERPROFILE%\.claude in both cases.
+# Line wrapping: when all segments fit the terminal width, ONE line (the same bytes as before); otherwise it moves greedily to a second
+# (if needed a third) line, first at segment boundaries (" | "), splitting a segment that does not fit at its " · " parts; no part is
+# cut or split. Width: QUOTA_LINE_WIDTH (manual) > COLUMNS (Claude Code passes it to the status line process; on Windows
+# [Console]::WindowWidth and `mode con` are wrong or fail with redirected stdio) > 120. Margin: QUOTA_LINE_MARGIN (default 4 = the
+# measured Claude Code margin, + settings.json statusLine.padding x 2). Wrapping runs AFTER the statusline-extra.ps1 output (personal
+# warnings count too).
 param(
     [string]$ClaudeDir = (Join-Path $env:USERPROFILE '.claude'),
     [string]$StatusLine = (Join-Path (Split-Path $PSScriptRoot -Parent) 'statusline.ps1'),
-    [string]$Ek = (Join-Path $ClaudeDir 'bin/statusline-ek.ps1')
+    [string]$Extra = (Join-Path $ClaudeDir 'bin/statusline-extra.ps1')
 )
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-# %LOCALAPPDATA%\Programs\Python\Python3*\ içindeki pythonw'ı PATH'e ekle (en yeni sürüm önce)
+# Put the pythonw from %LOCALAPPDATA%\Programs\Python\Python3*\ on PATH (newest version first)
 if (-not (Get-Command pythonw -ErrorAction SilentlyContinue)) {
     $py = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\Python') -Directory -Filter 'Python3*' -ErrorAction SilentlyContinue |
         Sort-Object Name -Descending |
@@ -27,16 +29,16 @@ if (-not (Get-Command pythonw -ErrorAction SilentlyContinue)) {
     if ($py) { $env:PATH = $py.FullName + ';' + $env:PATH }
 }
 
-# stdin'i bu süreç okumaz: statusline.ps1 kendisi okur
-# Doğrudan depodan çalışırken hiçbir hata durum çubuğunda görünmemeli: betik hata verir ya da boş dönerse en az 'Claude' yazılır
+# This process does not read stdin: statusline.ps1 reads it itself
+# Running straight from the clone, no error may ever show in the status line: when the script fails or returns nothing, at least 'Claude' is printed
 try { $line = (& $StatusLine) -join '' } catch { $line = '' }
 if (-not $line) { $line = 'Claude' }
-if (Test-Path $Ek) {
-    try { $line = [string](& $Ek -Line $line) } catch {}
+if (Test-Path $Extra) {
+    try { $line = [string](& $Extra -Line $line) } catch {}
 }
 
-# Ekranda kapladığı hücre sayısı: ANSI kaçışları sayılmaz, geniş karakter/emoji 2, sıfır genişlikli 0
-function Get-HucreGenislik([string]$Text) {
+# Number of screen cells: ANSI escapes do not count, wide characters/emoji 2, zero-width 0
+function Get-CellWidth([string]$Text) {
     $m = $Text -replace '\x1b\[[0-9;?]*[ -/]*[@-~]', '' -replace '\x1b\][^\x07\x1b]*(\x07|\x1b\\)', ''
     $w = 0
     for ($i = 0; $i -lt $m.Length; $i++) {
@@ -52,41 +54,42 @@ function Get-HucreGenislik([string]$Text) {
     $w
 }
 
-# Genişlik: elle ayar > COLUMNS > 120
+# Width: manual setting > COLUMNS > 120
 $width = 0
 foreach ($name in 'QUOTA_LINE_WIDTH', 'COLUMNS') {
     $v = [Environment]::GetEnvironmentVariable($name)
     if ("$v".Trim() -match '^\d{1,4}$' -and [int]$v.Trim() -ge 20) { $width = [int]$v.Trim(); break }
 }
 if ($width -eq 0) { $width = 120 }
-# Kenar payı, Claude Code 2.1.310'da gerçek ekranda ölçüldü (tests/test_real_screen.py; hem tam ekran hem klasik görünüm, 80-250 sütun): bir durum
-# satırı en çok (sütun - 4) hücre gösterilir (solda 2 girinti, sağda 2 boşluk); fazlası kesilir ve "…" ile biter, SARILMAZ. settings.json'daki
-# statusLine.padding her iki yana eklenir: pay = 4 + 2 x padding. QUOTA_LINE_PAY verilirse o geçerlidir.
-$pay = 4
-if ("$env:QUOTA_LINE_PAY".Trim() -match '^\d{1,3}$') { $pay = [int]$env:QUOTA_LINE_PAY.Trim() }
+# Margin, measured on the real screen with Claude Code 2.1.310 (tests/test_real_screen.py; full-screen and classic view, 80-250 columns):
+# a status line shows at most (columns - 4) cells (2 indent on the left, 2 spaces on the right); the rest is cut and ends with "…", it is
+# NOT wrapped. The settings.json statusLine.padding is added on both sides: margin = 4 + 2 x padding. A given QUOTA_LINE_MARGIN wins.
+$margin = 4
+if ("$env:QUOTA_LINE_MARGIN".Trim() -match '^\d{1,3}$') { $margin = [int]$env:QUOTA_LINE_MARGIN.Trim() }
 else {
     try {
-        $ham = Get-Content (Join-Path $ClaudeDir 'settings.json') -Raw -ErrorAction Stop
-        if ($ham -match '"padding"') {
-            $pd = ($ham | ConvertFrom-Json).statusLine.padding
-            if ($pd -is [ValueType] -and [int]$pd -gt 0 -and [int]$pd -le 50) { $pay += 2 * [int]$pd }
+        $raw = Get-Content (Join-Path $ClaudeDir 'settings.json') -Raw -ErrorAction Stop
+        if ($raw -match '"padding"') {
+            $pd = ($raw | ConvertFrom-Json).statusLine.padding
+            if ($pd -is [ValueType] -and [int]$pd -gt 0 -and [int]$pd -le 50) { $margin += 2 * [int]$pd }
         }
     } catch {}
 }
-$limit = [Math]::Max($width - $pay, 20)
+$limit = [Math]::Max($width - $margin, 20)
 
-# Her satırı (ek betik zaten satır sonu koyduysa her birini) parça parça açgözlü sar: parçalar " | " bölümleri ve bölüm içinde " · " kısımlarıdır;
-# sığan parça kendi ayracıyla satıra eklenir, sığmayan yeni satırı başlatır (satır ayraçla başlamaz, parça bölünmez)
-$result = foreach ($ham in ($line -split "`r?`n")) {
-    if ((Get-HucreGenislik $ham) -le $limit) { $ham; continue }
+# Wrap each line (each one, when the extension already put line breaks in) greedily piece by piece: the pieces are the " | " segments
+# and the " · " parts inside a segment; a piece that fits is added with its own separator, one that does not starts a new line (a line
+# never starts with a separator, a piece is never split)
+$result = foreach ($raw in ($line -split "`r?`n")) {
+    if ((Get-CellWidth $raw) -le $limit) { $raw; continue }
     $cur = $null
-    foreach ($seg in ($ham -split ' \| ')) {
+    foreach ($seg in ($raw -split ' \| ')) {
         $i = 0
         foreach ($p in ($seg -split ' · ')) {
             $delimiter = if ($i -eq 0) { ' | ' } else { ' · ' }
             $i++
             if ($null -eq $cur) { $cur = $p }
-            elseif ((Get-HucreGenislik "$cur$delimiter$p") -le $limit) { $cur = "$cur$delimiter$p" }
+            elseif ((Get-CellWidth "$cur$delimiter$p") -le $limit) { $cur = "$cur$delimiter$p" }
             else { $cur; $cur = $p }
         }
     }

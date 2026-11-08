@@ -3,10 +3,10 @@ import json, os, re, shutil, subprocess, sys, tempfile, time, unittest
 
 PLUG = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 PY = sys.executable
-TR_DAYS = ("Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz")
+DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
-class DayNameEachTimeTurkish(unittest.TestCase):
+class FixedDayNames(unittest.TestCase):
     """The day name must never come from the locale (%a gives "Mon" on macOS/Windows)."""
 
     def test_no_locale_day_format_in_status_line_code(self):
@@ -15,8 +15,8 @@ class DayNameEachTimeTurkish(unittest.TestCase):
                 code = f.read()
             self.assertIsNone(re.search(r"strftime\([^)]*%[aA]|date\s+[^\n]*%[aA]|-Format\s+'[^']*ddd", code), name)
 
-    def test_hook_message_uses_turkish_day_names(self):
-        home = tempfile.mkdtemp(prefix="gun-test-")
+    def test_hook_message_uses_the_fixed_day_names(self):
+        home = tempfile.mkdtemp(prefix="day-test-")
         try:
             os.makedirs(os.path.join(home, ".claude"))
             now = int(time.time())
@@ -29,8 +29,8 @@ class DayNameEachTimeTurkish(unittest.TestCase):
             r = subprocess.run([PY, "-I", os.path.join(PLUG, "bin", "pace-hook.py")], input=b'{"session_id":"t","hook_event_name":"SessionStart"}',
                                capture_output=True, env=env, timeout=60)
             out = r.stdout.decode("utf-8")
-            exp = TR_DAYS[time.localtime(reset - 5 * 3600).tm_wday]   # the forecast target is 5 h before the reset
-            self.assertRegex(out, r"\((%s) \d\d\.\d\d \d\d:\d\d, reset -5h\)" % "|".join(TR_DAYS))
+            exp = DAYS[time.localtime(reset - 5 * 3600).tm_wday]   # the forecast target is 5 h before the reset
+            self.assertRegex(out, r"\((%s) \d\d\.\d\d \d\d:\d\d, reset -5h\)" % "|".join(DAYS))
             self.assertIn("(%s " % exp, out)
         finally:
             shutil.rmtree(home, ignore_errors=True)

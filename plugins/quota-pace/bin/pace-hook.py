@@ -5,7 +5,7 @@ This hook prints one context line at session start and whenever the mode changes
 """
 import json, os, sys, time
 try:
-    sys.stdout.reconfigure(encoding='utf-8')  # day names contain 'Ç'; the Windows pipe default is the ANSI code page
+    sys.stdout.reconfigure(encoding='utf-8')  # the hook text holds non-ASCII signs; the Windows pipe default is the ANSI code page
 except Exception:
     pass
 
@@ -64,12 +64,12 @@ try:
 except Exception:
     pass
 
-TR_DAYS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']  # never the locale's %a (macOS/Windows print "Mon" etc.)
+DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']  # fixed names, never the locale's %a (it differs per machine and language)
 
 
 def when(ts):
     lt = time.localtime(ts)
-    return f"{TR_DAYS[lt.tm_wday]} {time.strftime('%d.%m %H:%M', lt)}"
+    return f"{DAYS[lt.tm_wday]} {time.strftime('%d.%m %H:%M', lt)}"
 
 
 reset = when(p['week_resets_at'])
@@ -117,7 +117,7 @@ else:
 if handover:
     print("[Quota >= 95%, before the target window] Hand over all work now (shared rule \"Hand-over at 95%\"): "
           "push every In Progress task (WIP if needed), post a done/remaining/next hand-over comment on its issue, "
-          "unassign yourself and move the card back to \"Yapay Zeka\", assign no one else, post \"devredildi\" (no @person) in its Slack thread, "
+          "unassign yourself and move the card back to \"AI queue\", assign no one else, post \"handed-over\" (no @person) in its Slack thread, "
           "and start nothing new.")
 elif high:
     print("[Quota >= 90%] Weekly use at 90% or more: keep working. Work the user asks for starts immediately, and work that "

@@ -60,15 +60,15 @@ class InvalidReset(unittest.TestCase):
         self.assertEqual(json.load(open(self.pj))["week_used"], 36)
 
     def test_no_five_hour_window_is_not_zero(self):
-        """rate_limits with seven_day only: the 5-hour window is unknown (null), not 0% - no 5sa segment, no 5-hour sentence, no 5h mode rule."""
+        """rate_limits with seven_day only: the 5-hour window is unknown (null), not 0% - no 5h segment, no 5-hour sentence, no 5h mode rule."""
         now = int(time.time())
         seven = {"used_percentage": 36, "resets_at": now + 3 * 86400}
         line = self.status(payload(now, seven, None))
         p = json.load(open(self.pj))
         self.assertIsNone(p["five_hour_used"])
         self.assertEqual(p["five_hour_resets_at"], 0)
-        self.assertNotIn("5sa", line)
-        self.assertRegex(line, r"\| hafta %36")
+        self.assertNotIn("5h ", line)
+        self.assertRegex(line, r"\| week 36%")
         out = self.hook()
         self.assertIn("[Quota pace:", out)
         self.assertNotIn("5-hour", out)
@@ -82,7 +82,7 @@ class InvalidReset(unittest.TestCase):
         seven = {"used_percentage": 36, "resets_at": now + 3 * 86400}
         self.status(payload(now, seven, None))
         line = self.status(payload(now, seven, {"used_percentage": 15, "resets_at": now + 3600}))
-        self.assertIn("5sa %15", line)
+        self.assertIn("5h 15%", line)
         self.assertEqual(json.load(open(self.pj))["five_hour_used"], 15)
         self.assertIn("5-hour window 15% used", self.hook())
 
