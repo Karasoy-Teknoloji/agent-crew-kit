@@ -10,6 +10,7 @@ import unittest
 
 TOOLS = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
 TOOL = "gh_board.py"     # stdlib only, imports hidden at the top (a missing hidden.py once raised ModuleNotFoundError: hidden)
+SIBLINGS = ("settings.py",)   # other tools/ modules the tool imports (they ship together; only hidden.py may be missing)
 
 LOAD = ("import importlib.util, sys; s = importlib.util.spec_from_file_location('t', sys.argv[1]); m = importlib.util.module_from_spec(s); "
         "s.loader.exec_module(m); g = m.hidden; r = g.run([sys.executable, '-c', 'print(7)'], capture_output=True, text=True, visible=True); "
@@ -26,15 +27,15 @@ class HiddenLoad(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
 
     def test_fallback_when_hidden_py_work_missing(self):
-        shutil.copy(os.path.join(TOOLS, TOOL), self.d)
-        shutil.copy(os.path.join(TOOLS, "hidden_loader.py"), self.d)      # no hidden.py next to it
+        for f in (TOOL, "hidden_loader.py", *SIBLINGS):
+            shutil.copy(os.path.join(TOOLS, f), self.d)                     # no hidden.py next to it
         r = py("-I", "-c", LOAD, os.path.join(self.d, TOOL), cwd=self.d)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.split(), ["hidden", "0", "7", "4"])      # plain subprocess stand-in: same API, no creation flag
         self.assertEqual(r.stderr.count("hidden.py not found"), 1, r.stderr)   # exactly one warning line
 
     def test_real_hidden_work_used_when_present_and_prints_no_warning(self):
-        for f in (TOOL, "hidden_loader.py", "hidden.py"):
+        for f in (TOOL, "hidden_loader.py", "hidden.py", *SIBLINGS):
             shutil.copy(os.path.join(TOOLS, f), self.d)
         r = py("-I", "-c", LOAD, os.path.join(self.d, TOOL), cwd=self.d)
         self.assertEqual(r.returncode, 0, r.stderr)

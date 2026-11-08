@@ -41,7 +41,7 @@ Quota data: pace.json (written by the status line of any interactive session, in
 runs/<ts>-brief.md. Files, all under <config dir>/last-window/:
   <date>.md      the run journal (the coordinator appends DONE/WIP/SKIP/NOTE lines; the wrapper adds a header and a footer)
   runs/*-brief.md  the brief of each run (kept 14 days)     coordinator.lock   pid lock + the session of the run     status.json   quota, last start
-Shared log: reports/last-window/<person>.md (one row per run; the Items cell starts with `session:<name>`) and LOG.md (all people,
+Shared log: reports/last-window/<person>.md (folder: config key last-window-dir) (one row per run; the Items cell starts with `session:<name>`) and LOG.md (all people,
 newest first) in claude-shared main, pushed through its own clone (~/.cache/claude-shared-last-window) with the same ownership rules as
 the usage ranking (the name must be listed in people.json; only your own file is written).
 Env: LAST_WINDOW_CLAUDE (claude executable), LAST_WINDOW_MODEL / LAST_WINDOW_ARGS (extra `claude` args of the fallback session),
@@ -68,6 +68,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # python -I does not add the script directory
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "..", "tools"))  # repo layout: tools/hidden.py (a --copy install ships it next to this file)
 from hidden_loader import hidden  # noqa: E402  (one hidden-launch helper)
+import settings  # noqa: E402  (tools/settings.py, the one config-key reader)
 
 HOME = os.path.expanduser("~")
 CLAUDE = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude")
@@ -96,7 +97,8 @@ RESUME_DELAY = 10 * 60       # the resume alarm waits this long after the 5-hour
 RESUME_MAX_AGE = 12 * 3600   # a limit stop older than this is not resumed by the transcript-only fallback (a session left open for days)
 RESUME_MAX_SESSION = 5        # at most this many sessions get the resume relay per reset
 BURN_IDLE_WAIT = 3600      # burn mode: a run that ended with nothing done or in progress holds the next start this long
-REPO_DIR = "reports/last-window"
+# the shared log folder inside the shared repo: config key CLAUDE_SHARED_LAST_WINDOW_DIR / last-window-dir (README, Configuration)
+REPO_DIR = settings.value("last-window-dir", "CLAUDE_SHARED_LAST_WINDOW_DIR", "reports/last-window").strip("/")
 LOG = "LOG.md"
 LINE_CAP = 200
 TIME = time.time             # replaced by tests

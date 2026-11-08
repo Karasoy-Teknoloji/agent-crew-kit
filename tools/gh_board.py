@@ -20,7 +20,8 @@
   python gh_board.py rate                       # GraphQL / REST remaining (REST call, free)
 
 `set` resolves issue node ids via REST, then sends up to 20 items per single GraphQL request (aliases).
-Needs the gh CLI logged in with the `project` scope, and GH_ORG (env) = the GitHub org that owns the boards. Stdlib only.
+Needs the gh CLI logged in with the `project` scope, and the config key GH_ORG (env, ~/.config/claude-shared/org or
+<clone>/team-config/org; tools/settings.py) = the GitHub org that owns the boards. Stdlib only.
 """
 import argparse
 import json
@@ -30,10 +31,11 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # python -I drops the script dir
 from hidden_loader import hidden  # noqa: E402  (one hidden-launch helper)
+import settings  # noqa: E402  (the one config-key reader)
 import time
 from pathlib import Path
 
-OWNER = os.environ.get("GH_ORG", "").strip()   # config key GH_ORG (README, Configuration)
+OWNER = settings.value("org", "GH_ORG")   # config key GH_ORG / org (README, Configuration)
 CACHE = Path.home() / ".claude" / "gh-board-ids.json"
 BATCH = 20
 MIN_GQL = 200
@@ -312,7 +314,9 @@ YT_UPDATED = "Last updated"   # the built-in "Updated" field is not offered on n
 YT_VIEWS = (("Table", "table"), ("Board", "board"))   # (name, layout) of the views the project must have
 NO_CHECKLIST = "no checklist"
 CLOSED_DAYS = 30
-SHARED_PROJECT = int(os.environ.get("GH_BOARD_TEST_QUEUE") or 0)   # config key: number of the org test-queue project (0 = none); never a source for the management Status
+# config key GH_BOARD_TEST_QUEUE / test-queue: number of the org test-queue project (0 = none); never a source for the management Status
+_TEST_QUEUE = settings.value("test-queue", "GH_BOARD_TEST_QUEUE", "0")
+SHARED_PROJECT = int(_TEST_QUEUE) if _TEST_QUEUE.isdigit() else 0
 YT_STATUSES = ["Todo", "In Progress", "In review", "Done"]   # same names as the product boards, so the product Status maps 1:1
 
 CHECKBOX = re.compile(r"^(?:[-*+]|\d+[.)])\s+\[([ xX])\](?:\s|$)")

@@ -39,7 +39,8 @@ q=author:<login> org:<GH_ORG> author-date:>=<today-6>, minus the automation subj
 the sum of the row figures when `gh` is missing or fails. Default branch of each repo only (GitHub search limitation).
 Never fails loudly: any error goes to <config dir>/cost/share.log and the exit code stays 0.
 
-Config keys (env, else the first line of ~/.config/claude-shared/<file>; README, "Configuration"):
+Config keys (env, else the first line of ~/.config/claude-shared/<file>, else of <clone>/team-config/<file>; tools/settings.py,
+README "Configuration"):
   CLAUDE_SHARED_REMOTE (remote)              the team's shared usage repo (clone URL). No default: unset = the ranking is off.
   CLAUDE_SHARED_REPORT_DIR (report-dir)  report folder inside that repo, default reports/usage.
   CLAUDE_SHARED_PEOPLE (people-path)      the people list inside that repo, default plugins/quota-pace/people.json.
@@ -57,6 +58,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "..", "tools"))  # repo layout: tools/hidden.py (a --copy install ships it next to this file)
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from hidden_loader import hidden  # noqa: E402  (one hidden-launch helper)
+import settings  # noqa: E402  (the one config-key reader: env, ~/.config/claude-shared, <clone>/team-config)
 import runlog  # noqa: E402  (the rolling run log)
 import time
 
@@ -70,7 +72,7 @@ PLANS = (100, 200)
 MODELS = (("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku"), ("fable", "Fable"))
 
 HOME = os.path.expanduser("~")
-SETTING = os.path.join(HOME, ".config", "claude-shared")
+SETTING = settings.PERSONAL_DIR   # ~/.config/claude-shared: the installer writes person and plan here
 
 # A scanned repo's own config must not run code: command-line -c beats .git/config (fsmonitor, hooks, ssh, pager, external
 # diff, credential helpers, ext:: transport). Same list as tools/lost_work.py (SAFE_GIT); tools/ is not installed next to this file.
@@ -86,21 +88,10 @@ _CHECK = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
 
 
 # ------------------------------------------------------------------ small helpers
-def setting_path(name):
-    return os.path.join(SETTING, name)
-
-
-def read_from_file(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return f.readline().strip()
-    except OSError:
-        return ""
-
-
-def setting_value(name, env, default=""):
-    """One config key: env `env`, else the first line of ~/.config/claude-shared/<name>, else `default` (see the module doc)."""
-    return (os.environ.get(env) or read_from_file(setting_path(name)) or default).strip()
+def setting_value(name, env, default="", team=True):
+    """One config key through tools/settings.py: env `env`, ~/.config/claude-shared/<name>, <clone>/team-config/<name> (team keys
+    only), else `default` (see the module doc)."""
+    return settings.value(name, env, default, team=team)
 
 
 REPORT_DIR = setting_value("report-dir", "CLAUDE_SHARED_REPORT_DIR", "reports/usage").strip("/")
@@ -117,7 +108,7 @@ def clean_name(s, limit=30):
 
 
 def person_name():
-    name = os.environ.get("CLAUDE_SHARED_PERSON") or read_from_file(setting_path("person"))
+    name = setting_value("person", "CLAUDE_SHARED_PERSON", team=False)
     if not name:
         name = git_output(HOME, "config", "--get", "user.name") or ""
     return clean_name(name)
@@ -276,7 +267,7 @@ def weekly_quota(now=None):
 
 
 def root_dir():
-    path = os.environ.get("CLAUDE_SHARED_ROOT") or read_from_file(setting_path("root"))
+    path = setting_value("root", "CLAUDE_SHARED_ROOT", team=False)
     candidates = [path] if path else [os.path.join(HOME, "source", "repos"), os.path.join(HOME, "src")]   # documented defaults
     for a in candidates:
         a = os.path.expanduser(a)
@@ -579,7 +570,7 @@ def model_distribution(record):
 
 def read_plan():
     """100 or 200 from env CLAUDE_SHARED_PLAN / ~/.config/claude-shared/plan; None when not set (the row then says '—')."""
-    raw = os.environ.get("CLAUDE_SHARED_PLAN") or read_from_file(setting_path("plan"))
+    raw = setting_value("plan", "CLAUDE_SHARED_PLAN", team=False)
     m = re.search(r"\d+", raw or "")
     return int(m.group()) if m and int(m.group()) in PLANS else None
 

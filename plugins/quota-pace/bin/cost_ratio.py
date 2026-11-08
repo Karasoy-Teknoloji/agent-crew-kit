@@ -195,13 +195,8 @@ def plan_monthly(config_dir=None):
             return float(v)
     except (OSError, ValueError, AttributeError):
         pass
-    setting = os.environ.get("CLAUDE_SHARED_PLAN")
-    if not setting:
-        try:
-            with open(os.path.join(os.path.expanduser("~"), ".config", "claude-shared", "plan"), encoding="utf-8") as f:
-                setting = f.readline()
-        except OSError:
-            setting = ""
+    import settings   # tools/settings.py, the one config-key reader (personal key: no team-config value)
+    setting = settings.value("plan", "CLAUDE_SHARED_PLAN", team=False)
     m = re.search(r"\d+", setting or "")
     if m and int(m.group()) in (20, 100, 200):
         return float(m.group())

@@ -56,6 +56,7 @@ COST_FILES = [
     ("bin/cost_parse.py", "bin/cost_parse.py", "both"),
     ("bin/cost_share.py", "bin/cost_share.py", "both"),
     ("../../tools/runlog.py", "bin/runlog.py", "both"),     # the rolling run log of the scheduled job (a clone install finds it in tools/)
+    ("../../tools/settings.py", "bin/settings.py", "both"),   # the one config-key reader of cost_share / cost_ratio / last_window
     ("bin/cost_incremental.py", "bin/cost_incremental.py", "both"),
     ("bin/cost_ratio.py", "bin/cost_ratio.py", "both"),
     ("bin/cost_fx.py", "bin/cost_fx.py", "both"),
@@ -85,6 +86,7 @@ STATUS = "quota-pace.json"   # ~/.claude/<STATUS>: written by a direct-source (-
 CLONE = SRC.parent.parent
 sys.path.insert(0, str(CLONE / "tools"))   # tools/hidden.py: the one hidden-launch helper (python -I drops the script dir)
 from hidden_loader import hidden  # noqa: E402
+import settings  # noqa: E402  (tools/settings.py: the team layer, here its optional migration hook)
 RULES_WATCH = CLONE / "tools" / "rules_watch.py"
 HIDDEN_PS1 = CLONE / "tools" / "hidden.ps1"   # the one hidden-launch helper every Windows task snippet dot-sources
 LOST = CLONE / "tools" / "lost_work.py"
@@ -1851,6 +1853,14 @@ def main():
     # keeps the ranking and the Slack jobs (a bare run is the same with no new flag). --remove and --probe use only the flags given.
     # --whatif previews the same result, writing nothing.
     if not (a.remove or a.probe or a.setting):
+        # a downstream team's own migration (tools/team_migrate.py --ensure, absent in the kit) runs before the saved record is read,
+        # so it can bring old state, settings and names up to date first; it fails open (settings.team_migrate)
+        if a.whatif:
+            if Path(settings.MIGRATE).is_file():
+                say("whatif: would run the team migration (tools/team_migrate.py --ensure) first")
+        else:
+            for line in settings.team_migrate():
+                say(line)
         record = registered_setup(Path.home() / ".claude")
         if record:
             add_registered_flags(a, record)

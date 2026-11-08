@@ -425,7 +425,7 @@ class Commits(unittest.TestCase):
         self.addCleanup(shutil.rmtree, home, True)
         root = os.path.join(home, "src")
         os.makedirs(root)
-        with mock.patch.dict(os.environ, {}, clear=False), mock.patch.object(P, "HOME", home),                 mock.patch.object(P, "read_from_file", return_value=""):
+        with mock.patch.dict(os.environ, {}, clear=False), mock.patch.object(P, "HOME", home),                 mock.patch.object(P.settings, "first_line", return_value=""):
             os.environ.pop("CLAUDE_SHARED_ROOT", None)
             self.assertEqual(P.root_dir(), root)
 
@@ -667,7 +667,7 @@ class GithubCommitCountWithoutStdout(unittest.TestCase):
     def test_no_org_configured_is_unknown_without_a_gh_call(self):
         go = mock.Mock()
         with tempfile.TemporaryDirectory() as d, mock.patch.object(P, "_cache_path", return_value=os.path.join(d, "ob.json")), \
-                mock.patch.object(P.subprocess, "run", go), mock.patch.object(P, "read_from_file", return_value=""), \
+                mock.patch.object(P.subprocess, "run", go), mock.patch.object(P.settings, "first_line", return_value=""), \
                 mock.patch.dict(os.environ, {"GH_ORG": ""}):
             self.assertIsNone(P.github_commit_count("x", "2026-11-01", now=1.0))
         go.assert_not_called()
