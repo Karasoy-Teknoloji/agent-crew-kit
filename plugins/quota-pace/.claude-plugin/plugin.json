@@ -1,7 +1,7 @@
 {
   "name": "quota-pace",
   "version": "0.7.0",
-  "description": "Ekibin tek kota temposu: haftalik kota tahmini sifirlanmadan N saat (varsayilan 5) once bitecek sekilde hedeflenir; PLENTY/NORMAL/TIGHT modu ve %90/%95 uyarilari. Istege bagli (install --cost): Claude Code cost istatistikleri (API liste fiyati karsiligi, yerel).",
+  "description": "The team's one quota pace: the weekly quota forecast aims to run out N hours (default 5) before the reset; PLENTY/NORMAL/TIGHT mode and the 90%/95% warnings. Included by default (install --free leaves it out): Claude Code cost statistics (API list-price equivalent, local).",
   "author": {
     "name": "agent-crew-kit contributors"
   }

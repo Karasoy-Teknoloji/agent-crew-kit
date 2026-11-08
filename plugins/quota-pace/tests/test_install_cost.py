@@ -20,9 +20,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def copy(args):
-    """The installer runs from the clone by default; these tests exercise the legacy copy mode unless they ask for --repodan."""
+    """The installer runs from the clone by default; these tests exercise the legacy copy mode unless they ask for --direct."""
     a = list(args)
-    return a if {"--repodan", "--copy", "--remove", "--probe"} & set(a) else ["--copy", *a]
+    return a if {"--direct", "--copy", "--remove", "--probe"} & set(a) else ["--copy", *a]
 PLUG = os.path.normpath(os.path.join(HERE, ".."))
 INSTALL = os.path.join(PLUG, "install_common.py")
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
@@ -43,7 +43,7 @@ def rd(p):
 
 class Installer(unittest.TestCase):
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="kur-test-")
+        self.root = tempfile.mkdtemp(prefix="install-test-")
         self.home = os.path.join(self.root, "home")
         os.makedirs(self.home)
         self.fakebin = os.path.join(self.root, "fakebin")
@@ -59,9 +59,9 @@ class Installer(unittest.TestCase):
         shutil.rmtree(self.root, ignore_errors=True)
 
     def install(self, *args):
-        return self.kur_ham(*copy(args))
+        return self.install_raw(*copy(args))
 
-    def kur_ham(self, *args):
+    def install_raw(self, *args):
         env = clean_env(HOME=self.home, USERPROFILE=self.home, PATH=self.fakebin + os.pathsep + os.environ.get("PATH", ""))
         win = ["--windows", "--shell", PWSH] if os.name == "nt" and PWSH else []   # Windows has no bash/jq guarantee: use the Windows branch
         return subprocess.run([sys.executable, "-I", INSTALL, *win, "--python", sys.executable, *args],
@@ -78,7 +78,7 @@ class Installer(unittest.TestCase):
         cfg = json.loads(rd(os.path.join(self.claude, "settings.json")))
         sub = cfg["subagentStatusLine"]["command"]
         self.assertEqual(sub, "%s -I %s" % (sys.executable.replace("\\", "/"), os.path.join(self.claude, "bin", "subagent-statusline.py").replace("\\", "/")))
-        self.assertIn("[OK] ajan satiri", r.stdout)                       # the self-check ran the written command
+        self.assertIn("[OK] agent row", r.stdout)                       # the self-check ran the written command
         self.assertEqual(self.install().returncode, 0)                        # idempotent: one entry, no change message the second time
         self.assertEqual(json.loads(rd(os.path.join(self.claude, "settings.json")))["subagentStatusLine"]["command"], sub)
 
@@ -89,7 +89,7 @@ class Installer(unittest.TestCase):
         r = self.install()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(json.loads(rd(os.path.join(self.claude, "settings.json")))["subagentStatusLine"]["command"], "my-own-thing")
-        self.assertIn("subagentStatusLine baska bir komut", r.stdout)
+        self.assertIn("subagentStatusLine is another command", r.stdout)
         os.remove(os.path.join(self.claude, "settings.json"))
         self.install()
         self.assertEqual(self.install("--remove").returncode, 0)
@@ -137,8 +137,8 @@ class Installer(unittest.TestCase):
         self.assertEqual(self.install("--cost").returncode, 0)
         r = self.install("--cost")
         self.assertEqual(r.returncode, 0, r.stdout)
-        self.assertIn("ayni: %s" % os.path.join(self.claude, "bin", "cost.py").replace("\\", "/"), r.stdout)
-        self.assertNotIn("yedek:", r.stdout.split("settings.json")[0])
+        self.assertIn("same: %s" % os.path.join(self.claude, "bin", "cost.py").replace("\\", "/"), r.stdout)
+        self.assertNotIn("backup:", r.stdout.split("settings.json")[0])
         shutil.rmtree(self.root + "/home")
         os.makedirs(self.home)
         w = self.install("--cost", "--whatif")
@@ -162,10 +162,10 @@ class Installer(unittest.TestCase):
         self.assertFalse(os.path.exists(self.calls))
 
     def run_as_real_home(self, *args):
-        """Run install_common.main() with real_ev() patched to the scratch HOME, so the branch that drives `systemctl --user`
+        """Run install_common.main() with real_home() patched to the scratch HOME, so the branch that drives `systemctl --user`
         (taken on a teammate's real home) executes against the FAKE systemctl first on PATH."""
         code = ("import sys; from pathlib import Path; sys.path.insert(0, %r); import install_common; "
-                "install_common.real_ev = lambda: Path(%r); install_common.claude_plugin = lambda *a, **k: (True, 'ok'); sys.argv = ['install_common', '--python', %r] + %r; sys.exit(install_common.main())"
+                "install_common.real_home = lambda: Path(%r); install_common.claude_plugin = lambda *a, **k: (True, 'ok'); sys.argv = ['install_common', '--python', %r] + %r; sys.exit(install_common.main())"
                 % (PLUG, self.home, sys.executable, copy(args)))
         env = clean_env(HOME=self.home, USERPROFILE=self.home, PATH=self.fakebin + os.pathsep + os.environ.get("PATH", ""))
         self.assertEqual(shutil.which("systemctl", path=env["PATH"]), os.path.join(self.fakebin, "systemctl"))   # never the real one
@@ -223,7 +223,7 @@ class Installer(unittest.TestCase):
         self.assertEqual(len(bak), 1)
         self.assertEqual(rd(os.path.join(d, bak[0])), old_)
         self.assertEqual(rd(os.path.join(d, "benim.conf")), other_)
-        self.assertEqual(len([l for l in r.stdout.splitlines() if "zamanlayici ayari" in l and "ranking.conf" in l]), 1)
+        self.assertEqual(len([l for l in r.stdout.splitlines() if "timer setting" in l and "ranking.conf" in l]), 1)
         self.assertIn("OnCalendar=*-*-* 00/2:23:00", rd(os.path.join(self.home, ".config", "systemd", "user", "cost-daily.timer")))
         self.assertEqual(rd(self.calls).split("\n")[:2], ["--user daemon-reload", "--user daemon-reload"])
         r = self.run_as_real_home("--cost", "--whatif")                    # nothing left to remove, and a dry run removes nothing
@@ -257,19 +257,19 @@ class Installer(unittest.TestCase):
             e = clean_env(HOME=self.home, **env)
             return subprocess.run(["bash", os.path.join(self.claude, "statusline.sh")], input=payload, capture_output=True, text=True, env=e, timeout=60).stdout
         self.assertEqual(self.install("--free").returncode, 0)
-        self.assertNotIn("önb", line())                                   # opted out: nothing added
-        self.assertNotIn("oturum $", line())
+        self.assertNotIn("cache ", line())                                   # opted out: nothing added
+        self.assertNotIn("session $", line())
         self.assertEqual(self.install().returncode, 0)                        # the default install has the cost segments
         on = line()
-        self.assertIn("önb %93 (2 kaçış)", on)
-        self.assertIn("oturum $1.23", on)
+        self.assertIn("cache 93% (2 misses)", on)
+        self.assertIn("session $1.23", on)
         self.assertIn("son 24sa $", on)
-        self.assertNotIn("önb", line(COST_STATUS="0"))                  # env switch
-        open(os.path.join(self.claude, "cost", "closed"), "w").close()
-        self.assertNotIn("önb", line())                                   # marker file switch
-        self.assertNotIn("oturum $", line())
+        self.assertNotIn("cache ", line(COST_STATUS="0"))                  # env switch
+        open(os.path.join(self.claude, "cost", "off"), "w").close()
+        self.assertNotIn("cache ", line())                                   # marker file switch
+        self.assertNotIn("session $", line())
 
-    # ---- --repodan: run from the clone (no copies), state file for rules_watch.py, --probe, --remove
+    # ---- --direct: run from the clone (no copies), state file for rules_watch.py, --probe, --remove
     COPIES = ("statusline.ps1", "statusline.sh", "bin/statusline-local.ps1", "bin/pace-hook.py", "bin/pace_forecast.py", "bin/line_wrap.py",
               "bin/subagent-statusline.py", "bin/cost.py", "bin/cost_core.py", "bin/cost-prices.json", "bin/cost-panel.html")
 
@@ -284,11 +284,11 @@ class Installer(unittest.TestCase):
                         out[os.path.join(d, n)] = f.read()
         return out
 
-    def test_repodan_points_everything_into_the_clone_and_removes_old_copies(self):
+    def test_direct_points_everything_into_the_clone_and_removes_old_copies(self):
         self.assertEqual(self.install().returncode, 0)                        # an earlier copy install
         self.assertTrue(self.installed("bin/pace-hook.py"))
         before = self.plugin_snapshot()
-        r = self.install("--repodan")
+        r = self.install("--direct")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.plugin_snapshot(), before)
         for f in self.COPIES:
@@ -308,26 +308,26 @@ class Installer(unittest.TestCase):
             self.assertTrue(status.endswith(plug + "/statusline.sh"), status)
         self.assertTrue(cfg["subagentStatusLine"]["command"].endswith(repo + "/plugins/crew-agents/tools/subagent-statusline.py"))
         status_ = json.loads(rd(os.path.join(self.claude, "quota-pace.json")))
-        self.assertEqual((status_["mode"], status_["repo"], status_["python"]), ("repodan", repo, sys.executable.replace("\\", "/")))
+        self.assertEqual((status_["mode"], status_["repo"], status_["python"]), ("direct", repo, sys.executable.replace("\\", "/")))
         self.assertEqual(status_["argv"][:2], ["--python", sys.executable.replace("\\", "/")])
-        self.assertEqual(status_["argv"][-1], "--repodan")
+        self.assertEqual(status_["argv"][-1], "--direct")
         if os.name == "nt" and PWSH:
             self.assertEqual(rd(os.path.join(self.claude, "bin", "cost.cmd")),
                              '@"%s" "%s/bin/cost.py" %%*\n' % (sys.executable.replace("\\", "/"), plug))
         else:
             self.assertIn('"%s/bin/cost.py"' % plug, rd(os.path.join(self.home, ".local", "bin", "cost")))
-        for ok in ("[OK] hook SessionStart", "[OK] cost --save", "[OK] durum cubugu", "[OK] ajan satiri"):
+        for ok in ("[OK] hook SessionStart", "[OK] cost --save", "[OK] status line", "[OK] agent row"):
             self.assertIn(ok, r.stdout)
-        again = self.install("--repodan")                                     # idempotent
+        again = self.install("--direct")                                     # idempotent
         self.assertEqual(again.returncode, 0, again.stdout)
-        self.assertIn("settings.json: degisiklik yok", again.stdout)
-        self.assertIn("ayni: %s/quota-pace.json" % self.claude.replace("\\", "/"), again.stdout)
+        self.assertIn("settings.json: no change", again.stdout)
+        self.assertIn("same: %s/quota-pace.json" % self.claude.replace("\\", "/"), again.stdout)
 
     def test_direct_source_is_the_default_with_backups_a_fallback_and_saved_flags(self):
         self.assertEqual(self.install("--copy").returncode, 0)
         self.assertTrue(self.installed("bin/cost.py"))                 # an older copy install
         old = rd(os.path.join(self.claude, "bin", "pace-hook.py"))
-        r = self.kur_ham()                                                   # no mode flag: direct source
+        r = self.install_raw()                                                   # no mode flag: direct source
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         for f in self.COPIES:
             self.assertFalse(self.installed(f), f)                        # the copies are gone ...
@@ -341,34 +341,34 @@ class Installer(unittest.TestCase):
         self.assertNotIn(os.path.join(self.claude, "bin"), json.dumps(cfg))
         if not (os.name == "nt" and PWSH):
             # a missing clone / failing script prints the minimal fallback line instead of an error
-            sh = cfg["statusLine"]["command"].replace(plug + "/statusline.sh", plug + "/yok/statusline.sh")
+            sh = cfg["statusLine"]["command"].replace(plug + "/statusline.sh", plug + "/missing/statusline.sh")
             o = subprocess.run(sh, shell=True, input="{}", capture_output=True, text=True)
             self.assertEqual((o.stdout, o.stderr), ("Claude", ""))
         self.assertEqual(json.loads(rd(os.path.join(self.claude, "quota-pace.json")))["setup"], [])
-        again = self.kur_ham()
+        again = self.install_raw()
         self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
         self.assertEqual(json.loads(rd(os.path.join(self.claude, "settings.json"))), cfg)   # idempotent
 
-    def test_repodan_probe_runs_the_quick_check_only(self):
-        self.assertEqual(self.install("--repodan").returncode, 0)
+    def test_direct_probe_runs_the_quick_check_only(self):
+        self.assertEqual(self.install("--direct").returncode, 0)
         before = rd(os.path.join(self.claude, "settings.json"))
-        r = self.install("--repodan", "--probe")
+        r = self.install("--direct", "--probe")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        for ok in ("[OK] hook SessionStart", "[OK] hook UserPromptSubmit", "[OK] cost --help", "[OK] durum cubugu", "[OK] ajan satiri"):
+        for ok in ("[OK] hook SessionStart", "[OK] hook UserPromptSubmit", "[OK] cost --help", "[OK] status line", "[OK] agent row"):
             self.assertIn(ok, r.stdout)
         self.assertNotIn("--save", r.stdout)                            # no first scan: it must stay fast
         self.assertNotIn("settings.json", r.stdout)                       # installs nothing
         self.assertEqual(rd(os.path.join(self.claude, "settings.json")), before)
 
-    def test_remove_undoes_repodan_and_copy_mode_drops_the_state_file(self):
-        self.assertEqual(self.install("--repodan").returncode, 0)
+    def test_remove_undoes_direct_and_copy_mode_drops_the_state_file(self):
+        self.assertEqual(self.install("--direct").returncode, 0)
         r = self.install()                                                    # back to the copied install
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertFalse(self.installed("quota-pace.json"))
         self.assertTrue(self.installed("bin/pace-hook.py"))
         cfg = json.loads(rd(os.path.join(self.claude, "settings.json")))
         self.assertEqual(cfg["hooks"]["SessionStart"][0]["hooks"][0]["args"][1], os.path.join(self.claude, "bin", "pace-hook.py").replace("\\", "/"))
-        self.assertEqual(self.install("--repodan").returncode, 0)
+        self.assertEqual(self.install("--direct").returncode, 0)
         r = self.install("--remove")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         cfg = json.loads(rd(os.path.join(self.claude, "settings.json")))
@@ -379,15 +379,15 @@ class Installer(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.home, ".local", "bin", "cost")))
         self.assertTrue(os.path.isfile(os.path.join(PLUG, "bin", "pace-hook.py")))   # the clone is never touched
 
-    def test_repodan_needs_the_cost_statistics(self):
-        r = self.install("--repodan", "--free")
+    def test_direct_needs_the_cost_statistics(self):
+        r = self.install("--direct", "--free")
         self.assertEqual(r.returncode, 2, r.stdout)
-        self.assertIn("--free ile birlikte verilemez", r.stdout)
+        self.assertIn("cannot be given together with --free", r.stdout)
         self.assertEqual(os.listdir(self.home), [])                       # nothing written
 
     @unittest.skipIf(os.name == "nt", "POSIX installer branch (systemd)")
-    def test_repodan_systemd_unit_runs_the_clone(self):
-        r = self.run_as_real_home("--repodan")
+    def test_direct_systemd_unit_runs_the_clone(self):
+        r = self.run_as_real_home("--direct")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         svc = rd(os.path.join(self.home, ".config", "systemd", "user", "cost-daily.service"))
         self.assertIn("ExecStart=%s %s --save" % (sys.executable, os.path.join(PLUG, "bin", "cost.py")), svc)
@@ -471,10 +471,10 @@ class WindowsInstaller(unittest.TestCase):
                               capture_output=True, text=True, encoding="utf-8", env=self.env(), timeout=600)
 
     def as_real_home(self, *args):
-        """install_common.main() with real_ev() patched to the scratch HOME and run_cmd_task() replaced by a recorder
+        """install_common.main() with real_home() patched to the scratch HOME and run_cmd_task() replaced by a recorder
         (the real Task Scheduler is never reached). Returns (process, list of recorded [snippet first line, exe, script])."""
         code = ("import sys, json; from pathlib import Path; sys.path.insert(0, %r); import install_common; calls = []; kcalls = []; sgcalls = []; "
-                "install_common.real_ev = lambda: Path(%r); install_common.claude_plugin = lambda *a, **k: (True, 'ok'); "
+                "install_common.real_home = lambda: Path(%r); install_common.claude_plugin = lambda *a, **k: (True, 'ok'); "
                 "install_common.run_cmd_task = lambda shell, ps, exe, script, **kw: (kcalls if kw.get('name') == 'lost-work' else sgcalls if kw.get('name') in ('slack-inbox', 'slack-triage') else calls).append([ps.strip().splitlines()[-1][:60], exe, script]) or True; "
                 "sys.argv = ['install_common', '--windows', '--python', %r, '--shell', %r] + %r; rc = install_common.main(); "
                 "print('CALLS' + json.dumps(calls)); print('KCALLS' + json.dumps(kcalls)); sys.exit(rc)"
@@ -496,7 +496,7 @@ class WindowsInstaller(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(self.claude, f)), f)
         cmd = rd(os.path.join(self.claude, "bin", "cost.cmd"))
         self.assertTrue(cmd.startswith('@"%s"' % sys.executable.replace("\\", "/")), cmd)
-        self.assertIn("gorev zamanlayici calistirilmadi", r.stdout)
+        self.assertIn("task scheduler not run", r.stdout)
         self.assertIn("[OK] cost --save", r.stdout)
         cfg = json.loads(rd(os.path.join(self.claude, "settings.json")))
         self.assertIn("statusline-local.ps1", cfg["statusLine"]["command"])
@@ -511,17 +511,17 @@ class WindowsInstaller(unittest.TestCase):
         _, exe, script = calls[0]
         self.assertTrue(exe.lower().endswith(("pythonw.exe", "python.exe")), exe)
         self.assertTrue(script.endswith("cost.py") and "\\" in script, script)
-        self.assertIn("[OK] gorev zamanlayici: 'cost-daily'", r.stdout)
+        self.assertIn("[OK] task scheduler: 'cost-daily'", r.stdout)
         r, calls = self.as_real_home("--remove")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(len(calls), 1)                            # the removal snippet was run once
         r, calls = self.as_real_home("--cost", "--whatif")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(calls, [])                                # -WhatIf registers nothing
-        self.assertIn("[-WhatIf] gorev zamanlayici", r.stdout)
+        self.assertIn("[-WhatIf] task scheduler", r.stdout)
 
-    def test_repodan_task_runs_the_clone_and_the_status_line_finds_its_siblings_there(self):
-        r, calls = self.as_real_home("--repodan")
+    def test_direct_task_runs_the_clone_and_the_status_line_finds_its_siblings_there(self):
+        r, calls = self.as_real_home("--direct")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(calls[0][2], os.path.join(PLUG, "bin", "cost.py").replace("/", "\\"))   # the task's script is the clone's
         # the configured command is the clone's wrapper; with no copies in the profile, the cost segments come from the clone's bin/
@@ -530,14 +530,14 @@ class WindowsInstaller(unittest.TestCase):
                               "prompt_cache": {"hit_ratio": 0.93, "misses": 2}, "cost": {"total_cost_usd": 1.2345}})
         out = subprocess.run([PWSH, "-NoProfile", "-File", os.path.join(PLUG, "bin", "statusline-local.ps1")], input=payload,
                              capture_output=True, text=True, encoding="utf-8", env=self.env(), timeout=120).stdout
-        self.assertIn("önb %93 (2 kaçış)", out)
-        self.assertIn("oturum $1.23", out)
+        self.assertIn("cache 93% (2 misses)", out)
+        self.assertIn("session $1.23", out)
 
     def test_task_snippets_are_user_level_only(self):
         sys.path.insert(0, PLUG)
         import install_common
         k = install_common.TASK_RECORD_PS
-        for need in ("Register-GizliGorev", "-Once -At", "AddMinutes(23)", "-RepetitionInterval (New-TimeSpan -Hours 2)", "-StartWhenAvailable", "--save", "Priority"):
+        for need in ("Register-HiddenTask", "-Once -At", "AddMinutes(23)", "-RepetitionInterval (New-TimeSpan -Hours 2)", "-StartWhenAvailable", "--save", "Priority"):
             self.assertIn(need, k)
         for bad in ("Highest", "SYSTEM", "-Password", "schtasks"):
             self.assertNotIn(bad, k)
@@ -548,20 +548,20 @@ class WindowsInstaller(unittest.TestCase):
                               "prompt_cache": {"hit_ratio": 0.93, "misses": 2}, "cost": {"total_cost_usd": 1.2345}})
         self.assertEqual(self.install("--free").returncode, 0)
         base = self.line(payload)
-        self.assertNotIn("önb", base)                       # opted out: nothing added
-        self.assertNotIn("oturum $", base)
+        self.assertNotIn("cache ", base)                       # opted out: nothing added
+        self.assertNotIn("session $", base)
         self.assertEqual(self.install().returncode, 0)
         on = self.line(payload)
-        self.assertIn("önb %93 (2 kaçış)", on)
-        self.assertIn("oturum $1.23", on)
+        self.assertIn("cache 93% (2 misses)", on)
+        self.assertIn("session $1.23", on)
         self.assertIn("son 24sa $", on)
-        self.assertNotIn("önb", self.line(payload, COST_STATUS="0"))
-        open(os.path.join(self.claude, "cost", "closed"), "w").close()
+        self.assertNotIn("cache ", self.line(payload, COST_STATUS="0"))
+        open(os.path.join(self.claude, "cost", "off"), "w").close()
         off = self.line(payload)
-        self.assertNotIn("önb", off)
-        self.assertNotIn("oturum $", off)
-        os.remove(os.path.join(self.claude, "cost", "closed"))
-        with open(os.path.join(self.claude, "bin", "statusline-ek.ps1"), "w", encoding="utf-8") as f:
+        self.assertNotIn("cache ", off)
+        self.assertNotIn("session $", off)
+        os.remove(os.path.join(self.claude, "cost", "off"))
+        with open(os.path.join(self.claude, "bin", "statusline-extra.ps1"), "w", encoding="utf-8") as f:
             f.write("param([string]$Line)\n$Line + ' | EK-TEST'\n")
         self.assertTrue(self.line(payload).strip().endswith("EK-TEST"))
 
@@ -572,20 +572,20 @@ class WindowsInstaller(unittest.TestCase):
                               "rate_limits": {"five_hour": {"used_percentage": 10, "resets_at": now + 7200},
                                               "seven_day": {"used_percentage": 20, "resets_at": now + 3 * 86400}}})
         out = self.line(payload)
-        self.assertIn("hafta %20", out)
+        self.assertIn("week 20%", out)
         pace = json.loads(rd(os.path.join(self.claude, "pace.json")))
         self.assertIn(pace["mode"], ("PLENTY", "NORMAL", "TIGHT"))
         self.assertEqual(pace["week_used"], 20)
 
 
     def test_real_profile_registers_and_removes_the_lost_work_task(self):
-        r, _ = self.as_real_home("--repodan")
+        r, _ = self.as_real_home("--direct")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(len(self.kcalls), 1)
         _, exe, script = self.kcalls[0]
         lost = os.path.join(os.path.dirname(os.path.dirname(PLUG)), "tools", "daily_lost_work.py")
         self.assertEqual(script, lost.replace("/", "\\"))       # the clone's script, never a copy
-        self.assertIn("[OK] gorev zamanlayici: 'lost-work'", r.stdout)
+        self.assertIn("[OK] task scheduler: 'lost-work'", r.stdout)
         self.assertIn("[OK] daily_lost_work --help", r.stdout)
         r, _ = self.as_real_home("--remove")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -594,7 +594,7 @@ class WindowsInstaller(unittest.TestCase):
 
     def test_lost_work_task_snippet_is_user_level_and_never_forces(self):
         k = install_common_module()
-        for need in ("Register-GizliGorev", "-Daily -At '17:30'", "-StartWhenAvailable"):
+        for need in ("Register-HiddenTask", "-Daily -At '17:30'", "-StartWhenAvailable"):
             self.assertIn(need, k.LOST_TASK_RECORD_PS)
         for bad in ("Highest", "SYSTEM", "-Password", "schtasks"):
             self.assertNotIn(bad, k.LOST_TASK_RECORD_PS)
@@ -604,7 +604,7 @@ class WindowsInstaller(unittest.TestCase):
         g = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(g)
         self.assertIn("--push-unpushed", g.ARGS)
-        self.assertIn("--cache-yaz", g.ARGS)
+        self.assertIn("--cache-write", g.ARGS)
         self.assertNotIn("--force", g.ARGS)
 
 
@@ -623,8 +623,8 @@ class RulesWatchHookMerge(unittest.TestCase):
         cfg = {"hooks": {"SessionStart": [{"matcher": "startup", "hooks": [
             {"type": "command", "command": "python ~/source/repos/claudeshared/tools/rules_watch.py", "timeout": 120}, other]}]}}
         self.assertEqual(k.merge_rules_watch(cfg, "/usr/bin/python3", False),
-                         ["SessionStart: rules_watch girisi guncellendi",
-                          "UserPromptSubmit: rules_watch girisi eklendi (kural uyarilari + kayip is raporu)"])
+                         ["SessionStart: rules_watch entry updated",
+                          "UserPromptSubmit: rules_watch entry added (rule warnings + lost-work report)"])
         hooks = cfg["hooks"]["SessionStart"][0]["hooks"]
         self.assertEqual(hooks[1], other)
         self.assertEqual(hooks[0]["args"][:2], ["-I", "-c"])
@@ -637,8 +637,8 @@ class RulesWatchHookMerge(unittest.TestCase):
         self.assertNotIn("UserPromptSubmit", cfg["hooks"])
         empty = {}
         self.assertEqual(k.merge_rules_watch(empty, "py", False),
-                         ["SessionStart: rules_watch girisi eklendi (kural uyarilari + kayip is raporu)",
-                          "UserPromptSubmit: rules_watch girisi eklendi (kural uyarilari + kayip is raporu)"])
+                         ["SessionStart: rules_watch entry added (rule warnings + lost-work report)",
+                          "UserPromptSubmit: rules_watch entry added (rule warnings + lost-work report)"])
         self.assertEqual(empty["hooks"]["SessionStart"][0]["matcher"], "startup")
         k.merge_rules_watch(empty, "py", True)
         self.assertEqual(empty, {})
@@ -651,7 +651,7 @@ class RulesWatchHookMerge(unittest.TestCase):
         cfg = {"hooks": {"Stop": [{"hooks": [hand, other]}]}}
         ch = k.merge_evidence_hook(cfg, "/usr/bin/python3", False)
         self.assertEqual(sorted(c.split(":")[0] for c in ch), ["Stop", "SubagentStop"])
-        self.assertIn("guncellendi", [c for c in ch if c.startswith("Stop:")][0])
+        self.assertIn("updated", [c for c in ch if c.startswith("Stop:")][0])
         self.assertIn("added", [c for c in ch if c.startswith("SubagentStop:")][0])
         for ev in ("Stop", "SubagentStop"):
             ours = [h for g in cfg["hooks"][ev] for h in g["hooks"] if "evidence_hook" in json.dumps(h)]
@@ -717,7 +717,7 @@ class RulesWatchHookMerge(unittest.TestCase):
         cfg = {}
         k.merge_evidence_hook(cfg, sys.executable, False)
         h = cfg["hooks"]["SubagentStop"][0]["hooks"][0]
-        r = subprocess.run([h["command"], *h["args"]], input=json.dumps({"hook_event_name": "SubagentStop", "last_assistant_message": "Bu probably yanlis."}),
+        r = subprocess.run([h["command"], *h["args"]], input=json.dumps({"hook_event_name": "SubagentStop", "last_assistant_message": "This is probably wrong."}),
                            capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 0)
         self.assertEqual(json.loads(r.stdout)["decision"], "block")
@@ -749,15 +749,15 @@ class ClaudePlugins(unittest.TestCase):
             if fail_first_install and args[0] == "install" and sum(1 for c in calls if c[0] == "install") == 1:
                 return False, "marketplace claude-shared not found"
             return True, "ok"
-        old_ = (k.claude_plugin, k.shutil.which, k.real_ev)
+        old_ = (k.claude_plugin, k.shutil.which, k.real_home)
         k.claude_plugin = fake
         k.shutil.which = lambda n: claude if n == "claude" else old_[1](n)
-        k.real_ev = lambda: Path.home() if real_home else Path(tempfile.gettempdir()) / "other"
+        k.real_home = lambda: Path.home() if real_home else Path(tempfile.gettempdir()) / "other"
         try:
             a = type("A", (), {"remove": remove, "whatif": whatif})()
             ok = k.claude_plugins({"enabledPlugins": enabled}, a, "")
         finally:
-            k.claude_plugin, k.shutil.which, k.real_ev = old_
+            k.claude_plugin, k.shutil.which, k.real_home = old_
         return ok, calls
 
     def test_install_only_claude_shared_enabled(self):
@@ -819,18 +819,18 @@ class CrewAgentsMerge(unittest.TestCase):
         kok = cfg["extraKnownMarketplaces"]["claude-shared"]["source"]["path"]
         with open(os.path.join(kok, ".claude-plugin", "marketplace.json"), encoding="utf-8") as f:
             sunday = json.load(f)
-        self.assertEqual(sunday["name"], k.SUNDAY)
+        self.assertEqual(sunday["name"], k.MARKETPLACE)
         entry = [p for p in sunday["plugins"] if p["name"] == k.AGENT_PLUGIN.split("@")[0]]
         self.assertEqual(len(entry), 1)
         self.assertTrue(entry[0]["source"].startswith("./"))     # relative path: Claude Code loads it in place from the clone
         self.assertTrue(os.path.isdir(os.path.join(kok, entry[0]["source"], "output-styles")))
         self.assertFalse(os.path.exists(os.path.join(kok, entry[0]["source"], "agents")))   # agents are linked, not plugin-loaded (#34)
-        self.assertFalse([p for p in sunday["plugins"] if p["name"] + "@" + k.SUNDAY in k.OLD_PLUGINS])
+        self.assertFalse([p for p in sunday["plugins"] if p["name"] + "@" + k.MARKETPLACE in k.OLD_PLUGINS])
 
 
 class CrewAgentsInstall(unittest.TestCase):
     """End to end under a scratch HOME: the install enables the plugin from the clone, links the agents and clears old-name agent files."""
-    setUp, tearDown, install, kur_ham = Installer.setUp, Installer.tearDown, Installer.install, Installer.kur_ham   # same scratch HOME, not the Installer tests
+    setUp, tearDown, install, install_raw = Installer.setUp, Installer.tearDown, Installer.install, Installer.install_raw   # same scratch HOME, not the Installer tests
 
     def test_install_enables_the_plugin_and_backs_up_old_agent_files(self):
         agents = os.path.join(self.claude, "agents")
@@ -838,7 +838,7 @@ class CrewAgentsInstall(unittest.TestCase):
         for name in ("quick-task", "haiku-worker", "own-ajanim"):
             with open(os.path.join(agents, name + ".md"), "w", encoding="utf-8") as f:
                 f.write("---\nname: %s\n---\n" % name)
-        r = self.kur_ham("--repodan")
+        r = self.install_raw("--direct")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         cfg = json.loads(rd(os.path.join(self.claude, "settings.json")))
         self.assertIs(cfg["enabledPlugins"]["crew-agents@claude-shared"], True)

@@ -20,9 +20,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def copy(args):
-    """The installer runs from the clone by default; these tests exercise the legacy copy mode unless they ask for --repodan."""
+    """The installer runs from the clone by default; these tests exercise the legacy copy mode unless they ask for --direct."""
     a = list(args)
-    return a if {"--repodan", "--copy", "--remove", "--probe"} & set(a) else ["--copy", *a]
+    return a if {"--direct", "--copy", "--remove", "--probe"} & set(a) else ["--copy", *a]
 sys.path.insert(0, HERE)
 from test_install_cost import PWSH, clean_env, rd  # noqa: E402
 
@@ -54,7 +54,7 @@ class Join(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.root = tempfile.mkdtemp(prefix="install-share-")
-        cls.remote = os.path.join(cls.root, "remote.git")        # the "shared repo": main holds the real kisiler.json
+        cls.remote = os.path.join(cls.root, "remote.git")        # the "shared repo": main holds the real people.json
         git("init", "-q", "--bare", "-b", "main", cls.remote)
         seed = os.path.join(cls.root, "seed")
         git("clone", "-q", cls.remote, seed)
@@ -65,11 +65,11 @@ class Join(unittest.TestCase):
         git("push", "-q", "origin", "HEAD:main", cwd=seed)
         cls.bos = os.path.join(cls.root, "bos.git")           # a repo whose main does not list anybody we use
         git("init", "-q", "--bare", "-b", "main", cls.bos)
-        t2 = os.path.join(cls.root, "tohum2")
+        t2 = os.path.join(cls.root, "seed2")
         git("clone", "-q", cls.bos, t2)
         os.makedirs(os.path.join(t2, "plugins", "quota-pace"))
         with open(os.path.join(t2, "plugins", "quota-pace", "people.json"), "w") as f:
-            json.dump({"someone_else": "Baska Kisi"}, f)
+            json.dump({"someone_else": "Someone Else"}, f)
         git("add", "-A", cwd=t2)
         git("commit", "-q", "-m", "seed", cwd=t2)
         git("push", "-q", "origin", "HEAD:main", cwd=t2)
@@ -96,15 +96,15 @@ class Join(unittest.TestCase):
     def env(self, **extra):
         e = clean_env(HOME=self.home, USERPROFILE=self.home, PATH=self.fakebin + os.pathsep + os.environ.get("PATH", ""),
                       CLAUDE_SHARED_REMOTE=self.remote, GIT_CONFIG_GLOBAL=self.gitconfig, GIT_CONFIG_SYSTEM=os.devnull)
-        for k in ("CLAUDE_SHARED_PERSON", "CLAUDE_SHARED_PLAN", "CLAUDE_SHARED_CLONE", "CLAUDE_SHARED_KOK"):
+        for k in ("CLAUDE_SHARED_PERSON", "CLAUDE_SHARED_PLAN", "CLAUDE_SHARED_CLONE", "CLAUDE_SHARED_ROOT"):
             e.pop(k, None)
         e.update(extra)
         return e
 
     def install(self, *args, **extra):
-        return self.kur_ham(*copy(args), **extra)
+        return self.install_raw(*copy(args), **extra)
 
-    def kur_ham(self, *args, **extra):
+    def install_raw(self, *args, **extra):
         win = ["--windows", "--shell", PWSH] if os.name == "nt" and PWSH else []
         return subprocess.run([sys.executable, "-I", INSTALL, *win, "--python", sys.executable, *args], capture_output=True, text=True,
                               encoding="utf-8", env=self.env(**extra), timeout=600)
@@ -114,14 +114,14 @@ class Join(unittest.TestCase):
 
     def daily_shares(self, *args):
         """Whether the daily job shares after an install with ARGS. POSIX: the systemd unit's command line. Windows: Task Scheduler
-        is never reached from a scratch profile, so the install runs with real_ev() patched to the scratch HOME and
+        is never reached from a scratch profile, so the install runs with real_home() patched to the scratch HOME and
         run_cmd_task() replaced by a recorder that keeps the `share` flag the real task registration would get (in a state file,
         which also answers task_shares(), the "was the registered task sharing" query). self.last = the installer output."""
         if POSIX:
             self.assertEqual(self.install(*args).returncode, 0)
             return "--save --share\n" in self.service()
         code = ("import sys, json; from pathlib import Path; sys.path.insert(0, %r); import install_common; calls = []; "
-                "install_common.real_ev = lambda: Path(%r); install_common.claude_plugin = lambda *a, **k: (True, 'ok'); "
+                "install_common.real_home = lambda: Path(%r); install_common.claude_plugin = lambda *a, **k: (True, 'ok'); "
                 "dur = Path(%r); install_common.task_shares = lambda shell: dur.exists() and dur.read_text() == '1'; "
                 "install_common.run_cmd_task = lambda shell, ps, exe, script, **kw: kw.get('name') == 'lost-work' or (calls.append(bool(kw.get('share'))), "
                 "dur.write_text('1' if kw.get('share') else '0'), True)[-1]; "
@@ -144,7 +144,7 @@ class Join(unittest.TestCase):
         with open(os.path.join(self.setting, "person"), "rb") as f:
             self.assertFalse(f.read().startswith(b"\xef\xbb\xbf"))      # no BOM: read_from_file would keep it in the name
         # the job's own readers, started under the same HOME/USERPROFILE, find the name and the plan in exactly these files
-        code = ("import sys; sys.path.insert(0, %r); import cost_share as P; print(P.SETTING); print(P.person_name()); print(P.plan_oku())"
+        code = ("import sys; sys.path.insert(0, %r); import cost_share as P; print(P.SETTING); print(P.person_name()); print(P.read_plan())"
                 % os.path.join(PLUG, "bin"))
         o = subprocess.run([sys.executable, "-I", "-X", "utf8", "-c", code], capture_output=True, text=True, encoding="utf-8",
                            env=self.env(), timeout=60)   # Windows: the child prints the non-ASCII name; its default code page is not UTF-8 (-I ignores PYTHONUTF8)
@@ -152,15 +152,15 @@ class Join(unittest.TestCase):
         if POSIX:
             self.assertIn("ExecStart=%s %s --save --share\n" % (sys.executable, os.path.join(self.claude, "bin", "cost.py")), self.service())
         self.assertTrue(self.daily_shares("--share", "--person", "Gül Ersoy", "--plan", "100"))
-        self.assertIn("[OK] ad kisiler.json'da, push yetkisi var", r.stdout)
-        self.assertIn("satir:", r.stdout)                                # the existing dry run printed the row
+        self.assertIn("[OK] name is in people.json, push access present", r.stdout)
+        self.assertIn("row:", r.stdout)                                # the existing dry run printed the row
 
     def test_name_defaults_to_git_user_name_and_plan_is_required(self):
         with open(self.gitconfig, "w") as f:
             f.write("[user]\n\tname = Emre\n")
         r = self.install("--share")
         self.assertEqual(r.returncode, 2, r.stdout)
-        self.assertIn("plan belli degil", r.stdout)
+        self.assertIn("no plan set", r.stdout)
         self.assertFalse(os.path.exists(self.setting))
         r = self.install("--share", "--plan", "200")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -172,10 +172,10 @@ class Join(unittest.TestCase):
             f.write("[user]\n\tname = example-tester-1\n")
         r = self.install("--share", "--plan", "100")                         # git name differs from the list: the Gül case
         self.assertEqual(r.returncode, 2, r.stdout)
-        self.assertIn("kisiler.json listesinde yok", r.stdout)
+        self.assertIn("is not in the people.json list", r.stdout)
         self.assertIn("Gül Ersoy", r.stdout)
         self.assertIn("--person", r.stdout)
-        r = self.install("--share", "--person", "Yok Kisi", "--plan", "100")
+        r = self.install("--share", "--person", "Nobody Listed", "--plan", "100")
         self.assertEqual(r.returncode, 2, r.stdout)
         for name in ("Emre", "Kerem Ali Koç", "Selim Akçay"):
             self.assertIn(name, r.stdout)
@@ -185,10 +185,10 @@ class Join(unittest.TestCase):
         for plan in ("150", "abc", ""):
             r = self.install("--share", "--person", "Emre", "--plan", plan)
             self.assertEqual(r.returncode, 2, (plan, r.stdout))
-            self.assertIn("gecersiz plan", r.stdout)
+            self.assertIn("invalid plan", r.stdout)
         r = self.install("--person", "Emre")
         self.assertEqual(r.returncode, 2)
-        self.assertIn("yalniz --share ile", r.stdout)
+        self.assertIn("only given together with --share", r.stdout)
         r = self.install("--share", "--free", "--person", "Emre", "--plan", "100")
         self.assertEqual(r.returncode, 2)
         self.assertEqual(os.listdir(self.home), ["gitconfig-bos"])
@@ -203,7 +203,7 @@ class Join(unittest.TestCase):
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         self.assertIn("gh auth login", r.stdout)
         self.assertIn("gh auth setup-git", r.stdout)
-        self.assertIn("Hicbir sey kurulmadi", r.stdout)
+        self.assertIn("Nothing was installed", r.stdout)
         self.assertFalse(os.path.exists(self.setting))
         self.assertFalse(os.path.exists(os.path.join(self.claude, "bin", "cost.py")))
         self.assertFalse(os.path.exists(os.path.join(self.claude, "settings.json")))
@@ -212,7 +212,7 @@ class Join(unittest.TestCase):
     def test_name_missing_from_main_of_the_shared_repo_stops_too(self):
         r = self.install("--share", "--person", "Emre", "--plan", "100", CLAUDE_SHARED_REMOTE=self.bos)
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
-        self.assertIn("main dalindaki kisiler.json icinde yok", r.stdout)
+        self.assertIn("is not in people.json on the main branch of the shared repo", r.stdout)
         self.assertFalse(os.path.exists(self.setting))
 
     def test_without_share_nothing_changes_and_reinstall_warns_when_the_job_used_to_share(self):
@@ -224,10 +224,10 @@ class Join(unittest.TestCase):
         if POSIX:
             r = self.install()                                                # plain re-install after joining
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("UYARI: onceki kurulumda runlog is paylasiyordu", r.stdout)
+            self.assertIn("WARNING: the previous install's runlog job was sharing", r.stdout)
         else:
             self.assertFalse(self.daily_shares())                    # plain re-install after joining
-            self.assertIn("UYARI: onceki kurulumda runlog is paylasiyordu", self.last)
+            self.assertIn("WARNING: the previous install's runlog job was sharing", self.last)
             self.assertFalse(self.daily_shares())
             self.assertNotIn("WARNING", self.last)                           # the task no longer shares: nothing to warn about
         self.assertFalse(self.daily_shares())
@@ -240,25 +240,25 @@ class Join(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         if POSIX:
             self.assertEqual(self.service(), before)
-        self.assertIn("ayni: %s" % os.path.join(self.setting, "person").replace("\\", "/"), r.stdout)
+        self.assertIn("same: %s" % os.path.join(self.setting, "person").replace("\\", "/"), r.stdout)
         self.assertEqual(sorted(os.listdir(self.setting)), ["person", "plan"])  # no backup copies of identical files
 
     def test_bare_rerun_reuses_the_saved_sharing_flags(self):
-        self.assertEqual(self.kur_ham("--share", "--person", "Emre", "--plan", "100").returncode, 0)
+        self.assertEqual(self.install_raw("--share", "--person", "Emre", "--plan", "100").returncode, 0)
         saved = json.loads(rd(os.path.join(self.home, ".claude", "quota-pace.json")))["setup"]
         self.assertEqual(saved, ["--share", "--person", "Emre", "--plan", "100"])
-        r = self.kur_ham()                                                # nothing given: the saved options apply
+        r = self.install_raw()                                                # nothing given: the saved options apply
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("Kayitli kurulum bayraklari", r.stdout)
+        self.assertIn("Keeping the saved install flags", r.stdout)
         self.assertEqual(rd(os.path.join(self.setting, "person")).strip(), "Emre")
         self.assertEqual(json.loads(rd(os.path.join(self.home, ".claude", "quota-pace.json")))["setup"], saved)
 
     def test_whatif_validates_but_writes_and_checks_nothing(self):
-        r = self.install("--whatif", "--share", "--person", "Yok Kisi", "--plan", "100")
+        r = self.install("--whatif", "--share", "--person", "Nobody Listed", "--plan", "100")
         self.assertEqual(r.returncode, 2, r.stdout)
         r = self.install("--whatif", "--share", "--person", "Emre", "--plan", "100", CLAUDE_SHARED_REMOTE=os.path.join(self.root, "missing.git"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)             # no access probe under --whatif
-        self.assertIn("Siralamaya katilim: ad 'Emre', plan $100", r.stdout)
+        self.assertIn("Joining the ranking: name 'Emre', plan $100", r.stdout)
         self.assertEqual(os.listdir(self.home), ["gitconfig-bos"])
 
     def test_remove_keeps_the_ranking_settings(self):
@@ -267,18 +267,18 @@ class Join(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertFalse(os.path.exists(os.path.join(self.udir, "cost-daily.service")))
         self.assertEqual(rd(os.path.join(self.setting, "person")), "Emre\n")
-        self.assertIn("Siralama ayarlari", r.stdout)
+        self.assertIn("The ranking settings", r.stdout)
 
     @unittest.skipUnless(POSIX and shutil.which("bash"), "bash only")
-    def test_kur_sh_parses_the_new_options(self):
+    def test_install_sh_parses_the_new_options(self):
         sh = os.path.join(PLUG, "install.sh")
         run = lambda *a: subprocess.run(["bash", sh, *a], capture_output=True, text=True, encoding="utf-8", env=self.env(), timeout=300)
         r = run("--whatif", "--share", "--person", "Gül Ersoy", "--plan", "100")   # --whatif needs no jq
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("Siralamaya katilim: ad 'Gül Ersoy', plan $100", r.stdout)   # the quoted name arrives as ONE argument
+        self.assertIn("Joining the ranking: name 'Gül Ersoy', plan $100", r.stdout)   # the quoted name arrives as ONE argument
         r = run("--whatif", "--share", "--person")
         self.assertEqual(r.returncode, 2)
-        self.assertIn("--person bir deger ister", r.stdout)
+        self.assertIn("--person needs a value", r.stdout)
         r = run("--whatif", "--bilinmeyen")
         self.assertEqual(r.returncode, 2)
         self.assertIn("--share", r.stdout)
@@ -287,10 +287,10 @@ class Join(unittest.TestCase):
 @unittest.skipUnless(POSIX, "launchd agent emulation: the POSIX installer branch")
 class Launchd(unittest.TestCase):
     """The macOS daily job. Linux has no launchctl, so the runner makes install_common think it is on macOS (`macos()`), points
-    real_ev() at the scratch HOME for the 'real profile' cases and records every launchctl call instead of running one."""
+    real_home() at the scratch HOME for the 'real profile' cases and records every launchctl call instead of running one."""
 
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="kur-launchd-")
+        self.root = tempfile.mkdtemp(prefix="install-launchd-")
         self.home = os.path.join(self.root, "home")
         os.makedirs(self.home)
         self.claude = os.path.join(self.home, ".claude")
@@ -302,9 +302,9 @@ class Launchd(unittest.TestCase):
     def run_mac(self, *args, real=True, env=None):
         code = ("import sys, json; from pathlib import Path; sys.path.insert(0, %r); import install_common; calls = []; "
                 "install_common.macos = lambda: True; %s"
-                "install_common.launchctl = lambda a, sessiz=False: calls.append(a) or True; "
+                "install_common.launchctl = lambda a, quiet=False: calls.append(a) or True; "
                 "sys.argv = ['install_common', '--python', %r] + %r; rc = install_common.main(); print('CALLS' + json.dumps(calls)); sys.exit(rc)"
-                % (PLUG, "install_common.real_ev = lambda: Path(%r); install_common.claude_plugin = lambda *a, **k: (True, 'ok'); " % self.home if real else "", sys.executable, copy(args)))
+                % (PLUG, "install_common.real_home = lambda: Path(%r); install_common.claude_plugin = lambda *a, **k: (True, 'ok'); " % self.home if real else "", sys.executable, copy(args)))
         e = clean_env(HOME=self.home, USERPROFILE=self.home)
         e.update(env or {})
         r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, encoding="utf-8", env=e, timeout=600)
@@ -340,11 +340,11 @@ class Launchd(unittest.TestCase):
         d = self.agent()
         self.assertEqual(d["ProgramArguments"], [sys.executable, "-I", os.path.join(self.claude, "bin", "cost.py"), "--save"])
         self.assertEqual(calls, [["bootout", domain + "/" + LABEL], ["bootstrap", domain, self.plist]])
-        self.assertNotIn("zamanlayici yok", r.stdout)
+        self.assertNotIn("no timer", r.stdout)
         self.assertFalse(os.path.exists(os.path.join(self.home, ".config", "systemd")))
         r, calls = self.run_mac("--cost")                                          # second install: same file, reloaded once
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("ayni: %s" % self.plist, r.stdout)
+        self.assertIn("same: %s" % self.plist, r.stdout)
         self.assertEqual(calls, [["bootout", domain + "/" + LABEL], ["bootstrap", domain, self.plist]])
         self.assertEqual(os.listdir(os.path.dirname(self.plist)), [LABEL + ".plist"])   # no backups, no second agent
 
@@ -367,7 +367,7 @@ class Launchd(unittest.TestCase):
         self.assertEqual(self.agent()["ProgramArguments"][-2:], ["--save", "--share"])
         self.assertEqual(rd(os.path.join(self.home, ".config", "claude-shared", "person")), "Emre\n")
         r, _ = self.run_mac("--cost", real=False)
-        self.assertIn("UYARI: onceki kurulumda runlog is paylasiyordu", r.stdout)
+        self.assertIn("WARNING: the previous install's runlog job was sharing", r.stdout)
         self.assertNotIn("--share", self.agent()["ProgramArguments"])
 
     def test_scratch_home_never_reaches_launchctl(self):
@@ -381,7 +381,7 @@ class Launchd(unittest.TestCase):
         r, calls = self.run_mac("--cost", "--whatif")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(calls, [])
-        self.assertIn("[-WhatIf] yaz: %s" % self.plist, r.stdout)
+        self.assertIn("[-WhatIf] write: %s" % self.plist, r.stdout)
         self.assertEqual(os.listdir(self.home), [])
 
     def test_remove_boots_out_and_deletes_the_plist_but_keeps_ranking_settings(self):
@@ -417,14 +417,14 @@ class WindowsTaskArguments(unittest.TestCase):
         self.assertEqual(seen, ["", " --share"])
 
     def test_every_task_snippet_runs_through_the_headless_conhost_prefix(self):
-        """One code path: all five registration snippets register through Register-GizliGorev (tools/hidden.ps1), take the interpreter args from INSTALL_TASK_ON (task_env), none hardcodes '-I' or builds its own action/principal."""
+        """One code path: all five registration snippets register through Register-HiddenTask (tools/hidden.ps1), take the interpreter args from INSTALL_TASK_ON (task_env), none hardcodes '-I' or builds its own action/principal."""
         sys.path.insert(0, PLUG)
         import install_common
         for name in ("TASK_RECORD_PS", "LOST_TASK_RECORD_PS", "SP_TASK_RECORD_PS", "SG_TASK_RECORD_PS", "ST_TASK_RECORD_PS"):
             ps = getattr(install_common, name)
             self.assertIn("-Argument ($env:INSTALL_TASK_ON + ' \"'", ps, name)
             self.assertNotIn("-Argument ('-I", ps, name)
-            self.assertIn("Register-GizliGorev", ps, name)
+            self.assertIn("Register-HiddenTask", ps, name)
             for own in ("New-ScheduledTaskAction", "New-ScheduledTaskPrincipal", "Register-ScheduledTask", "conhost"):
                 self.assertNotIn(own, ps, name)
 
@@ -434,7 +434,7 @@ class WindowsTaskArguments(unittest.TestCase):
         import install_common
         with open(install_common.HIDDEN_PS1, encoding="utf-8") as f:
             ps = f.read()
-        for need in ("function New-GizliEylem", "function Register-GizliGorev", "--headless", "conhost.exe", "pythonw.exe",
+        for need in ("function New-HiddenAction", "function Register-HiddenTask", "--headless", "conhost.exe", "pythonw.exe",
                      "-RunLevel Limited", "-LogonType Interactive", "Register-ScheduledTask"):
             self.assertIn(need, ps)
         for bad in ("Highest", "SYSTEM", "-Password", "schtasks"):
