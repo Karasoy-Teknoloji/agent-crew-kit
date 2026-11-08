@@ -2,6 +2,7 @@
 
 Run: python -m unittest discover -s tools/tests
 """
+# Turkish locale data: the Turkish chat samples and word lists below are the hook's input (it reads Turkish and English chat), not untranslated prose.
 import json
 import os
 import subprocess

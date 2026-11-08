@@ -308,6 +308,7 @@ DECISION_MARKERS = DECISION_VERBS + DECISION_NOUNS
 # Turkish question words: a prompt holding one is a question (also without "?") unless it holds a DECISION_VERBS word.
 QUESTION_WORDS = ["ne", "neler", "nedir", "neyi", "neye", "nede", "nasil", "neden", "niye", "nicin", "nerede", "nereye",
                   "nereden", "kim", "kimi", "kime", "kimde", "hangi", "hangisi", "kac", "kaci", "kacta"]
+# Turkish and English approval words: Turkish locale data (the hook reads Turkish chat).
 # A short reply (at most APPROVAL_MAX_WORDS words) whose first word is one of these approves the previous proposal.
 APPROVALS = ["tamam", "evet", "aynen", "olur", "ok", "okey", "okay", "uygun", "onay", "onayli", "yes", "sure"]
 APPROVAL_MAX_WORDS = 4
@@ -355,6 +356,7 @@ _GH_API_WRITE = re.compile(r"(?:\bgh\s+api\b|api\.github\.com/)(?=.*?" + _ISSUE_
                            r"(?!.*?(?:-X\s*GET|--method[\s=]+GET))", re.S | re.I)
 _MCP_ISSUE_WRITE = re.compile(r"github.*(?:add_issue_comment|create_issue|issue_write|add_comment)", re.I)
 _ISSUE_URL = re.compile(r"github\.com/[\w.-]+/[\w.-]+/issues/\d+")
+# Turkish locale data: urun kararlari / yorum / kaydet / olustur / yaz = product decisions / comment / save / create / write (the hook reads Turkish chat).
 _RECORD_TARGET = re.compile(r"(?<!\w)(?:issue\w*|urun\s+kararlari|product\s+decisions|[\w.-]+#\d+)")
 _RECORD_VERB = re.compile(r"(?<!\w)(?:comment\w*|yorum\w*|open|create|record|post|kaydet\w*|kaydi|ac|acin|olustur\w*|"
                           r"yaz\w*|write)(?!\w)")

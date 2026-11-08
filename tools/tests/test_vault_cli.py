@@ -450,6 +450,7 @@ class FindTests(unittest.TestCase):
         cls.home = tempfile.mkdtemp()
         os.environ.update(VAULT_ADDR="http://127.0.0.1:%d" % cls.srv.server_port, VAULT_TOKEN="t0k", HOME=cls.home, USERPROFILE=cls.home,
                           VAULT_FIND_EXCLUDING="secret/archive/")
+        # Turkish locale data: a Turkish Vault description (okuma = read, izinli = allowed) is the search input.
         RECORDS["panel/read-token"] = {"description": "Panel okuma PATi (salt okuma, izinli)", "token": "tok-VALUE-1234567"}
         RECORDS["panel/publish-token"] = {"description": "publish PATi", "token": "tok-" "OTHER-7654321"}
         RECORDS["archive/backup"] = {"password": "tok-ARCHIVE-1111111"}

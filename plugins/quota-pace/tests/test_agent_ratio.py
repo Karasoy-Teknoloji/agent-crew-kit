@@ -424,6 +424,7 @@ class SubagentRow(unittest.TestCase):
 
     def test_output_survives_a_legacy_console_code_page(self):
         # Windows pipes use cp1252/cp1254: "·" and "₺" must still arrive as valid UTF-8 JSON (the row used to vanish silently)
+        # Turkish locale data: a Turkish task description with Turkish letters.
         task = {"id": "zz", "agentType": "x", "description": "Türkçe açıklama", "tokenCount": 5}
         env = dict(os.environ, HOME=_HOME, CLAUDE_CONFIG_DIR=_CFG, PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
         p = subprocess.run([sys.executable, "-I", SUBAGENT_SCRIPT], input=json.dumps({"tasks": [task]}, ensure_ascii=False).encode("utf-8"),

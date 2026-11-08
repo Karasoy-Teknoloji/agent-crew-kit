@@ -553,6 +553,7 @@ DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 def file_name(person):
     """File stem for a person: lower case, Turkish letters folded, anything else becomes '-'."""
+    # Turkish locale data: the folding table is the Turkish alphabet.
     s = str(person).translate(str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")).lower()
     return re.sub(r"[^a-z0-9]+", "-", s).strip("-") or "person"
 

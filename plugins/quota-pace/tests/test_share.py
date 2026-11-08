@@ -66,6 +66,7 @@ class RowFormat(unittest.TestCase):
         self.assertEqual(P.add_to_file(m2, "Ali", P.build_line(record("2026-10-28", d7=999)), "2026-10-28"), m2)
 
     def test_names_and_file_stems(self):
+        # Turkish locale data: a Turkish name with Turkish letters is the input being folded.
         self.assertEqual(P.file_name("Çağrı Şen"), "cagri-sen")
         self.assertEqual(P.file_name("../x"), "x")
         self.assertEqual(P.model_family("claude-opus-5-5"), "opus")
@@ -366,6 +367,7 @@ class Commits(unittest.TestCase):
 
     def test_generated_and_data_files_are_excluded(self):
         t = lambda *x: "\t".join(x)
+        # Turkish locale data: Turkish folder names (Yardımcı, Doğru, Hata, Rehber) are real-world path samples.
         out = "\n".join(["\x01h1", t("9000", "0", "iso/standartlar/TS_EN_ISO_27002.pdf"), t("900", "0", "Yardımcı/Doğru/PRODUCT_A_SMS_CDR_1.cdr"),
                          t("90", "0", "Hata/bad_REHBER_2022.bad"), t("90", "0", "logs/x.jsonl"), t("90", "0", "img/a.svg"),
                          t("90", "0", "Api/Client.g.cs"), t("90", "0", "Api/Client.g.i.cs"), t("90", "0", "Hata/22-10-20/bad_REHBER_202210180930"), t("90", "0", "Rehber/PRODUCT_A_312_20221002"), t("5", "1", "src/Real.cs"), t("4", "0", "docs/a.md")])
@@ -677,6 +679,7 @@ class GithubCommitCountWithoutStdout(unittest.TestCase):
         kw = {}
         def run(*a, **k):
             kw.update(k)
+            # Turkish locale data: Turkish letters in a commit subject must survive decoding.
             return mock.Mock(returncode=0, stdout="feat: ğüş\nchore(usage): x\n")
         self.assertEqual(self._call(run), 1)
         self.assertEqual(kw.get("encoding"), "utf-8")
