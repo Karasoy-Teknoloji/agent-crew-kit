@@ -475,6 +475,7 @@ class WindowsInstaller(unittest.TestCase):
         (the real Task Scheduler is never reached). Returns (process, list of recorded [snippet first line, exe, script])."""
         code = ("import sys, json; from pathlib import Path; sys.path.insert(0, %r); import install_common; calls = []; kcalls = []; sgcalls = []; "
                 "install_common.real_home = lambda: Path(%r); install_common.claude_plugin = lambda *a, **k: (True, 'ok'); "
+                "install_common.run_cmd_sp_task = lambda *a, **k: True; "
                 "install_common.run_cmd_task = lambda shell, ps, exe, script, **kw: (kcalls if kw.get('name') == 'lost-work' else sgcalls if kw.get('name') in ('slack-inbox', 'slack-triage') else calls).append([ps.strip().splitlines()[-1][:60], exe, script]) or True; "
                 "sys.argv = ['install_common', '--windows', '--python', %r, '--shell', %r] + %r; rc = install_common.main(); "
                 "print('CALLS' + json.dumps(calls)); print('KCALLS' + json.dumps(kcalls)); sys.exit(rc)"

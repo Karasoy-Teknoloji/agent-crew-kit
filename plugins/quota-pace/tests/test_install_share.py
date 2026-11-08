@@ -122,6 +122,7 @@ class Join(unittest.TestCase):
             return "--save --share\n" in self.service()
         code = ("import sys, json; from pathlib import Path; sys.path.insert(0, %r); import install_common; calls = []; "
                 "install_common.real_home = lambda: Path(%r); install_common.claude_plugin = lambda *a, **k: (True, 'ok'); "
+                "install_common.run_cmd_sp_task = lambda *a, **k: True; "
                 "dur = Path(%r); install_common.task_shares = lambda shell: dur.exists() and dur.read_text() == '1'; "
                 "install_common.run_cmd_task = lambda shell, ps, exe, script, **kw: kw.get('name') == 'lost-work' or (calls.append(bool(kw.get('share'))), "
                 "dur.write_text('1' if kw.get('share') else '0'), True)[-1]; "
