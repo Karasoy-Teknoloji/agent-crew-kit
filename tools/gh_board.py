@@ -4,17 +4,17 @@
   python gh_board.py ids [--refresh]            # cache project/field/option ids in ~/.claude/gh-board-ids.json
   python gh_board.py set --project N --status "Yapay Zeka" --priority low URL [URL...] [--dry-run]
   python gh_board.py set --file items.json      # [{"url":..,"project":9,"status":..,"priority":..}, ...]
-  python gh_board.py durum-say --project N     # item count per Status value (read-only)
+  python gh_board.py status-count --project N     # item count per Status value (read-only)
   python gh_board.py items --status "Yapay Zeka" [--project N ...]
                                                 # read-only JSON list of the issues in a Status (every cached board that has
                                                 # it, or the given ones): repo, number, title, url, state, labels, assignees,
                                                 # Priority name and rank (0 = most urgent on that board)
-  python gh_board.py durum-ekle --project N "Yapay Zeka" [--color GRAY] [--description ""] [--before NAME] [--dry-run]
+  python gh_board.py add-status --project N "Yapay Zeka" [--color GRAY] [--description ""] [--before NAME] [--dry-run]
                                                 # add a Status option (at the end, or before option NAME), keeping all existing options AND their ids
-  python gh_board.py yonetim-esitle [--dry-run]
-                                                # management view: every org issue labelled `yonetim-takibi` (open + closed in
+  python gh_board.py sync-management [--dry-run]
+                                                # management view: every org issue labelled `management-takibi` (open + closed in
                                                 # the last 30 days) is mirrored into the org project "Yönetim Takibi" with
-                                                # "İlerleme %" computed from the issue itself and its sub-issues (yonetim_hesapla); creates the label
+                                                # "İlerleme %" computed from the issue itself and its sub-issues (compute_management); creates the label
                                                 # in every repo, the project and its fields when missing; removes items whose
                                                 # label is gone or that closed over 30 days ago. Idempotent, GraphQL-batched
   python gh_board.py rate                       # GraphQL / REST remaining (REST call, free)
@@ -29,7 +29,7 @@ import subprocess
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # python -I drops the script dir
-from gizli_yukle import gizli  # noqa: E402  (one hidden-launch helper)
+from hidden_loader import hidden  # noqa: E402  (one hidden-launch helper)
 import time
 from pathlib import Path
 
@@ -42,7 +42,7 @@ BOARD_Q = """query($p:ID!){node(id:$p){...on ProjectV2{id title fields(first:50)
 
 
 def gh(*args, inp=None):
-    r = gizli.run(["gh", *args], capture_output=True, text=True, encoding="utf-8", input=inp)
+    r = hidden.run(["gh", *args], capture_output=True, text=True, encoding="utf-8", input=inp)
     if r.returncode:
         sys.exit(r.stderr.strip() or r.stdout.strip())
     return r.stdout
@@ -261,7 +261,7 @@ def show_counts(c):
     return ", ".join(f"{k or '(no status)'}={v}" for k, v in sorted(c.items(), key=lambda kv: str(kv[0])))
 
 
-def cmd_durum_say(a):
+def cmd_status_count(a):
     pid = lookup(load_ids(), a.project, None, None) or sys.exit("unknown project")
     print(show_counts(count_status(pid)))
 
@@ -297,22 +297,22 @@ def add_status_option(ids, project, name, color="GRAY", description="", before=N
     print("OK counts identical, all option ids preserved")
 
 
-def cmd_durum_ekle(a):
+def add_cmd_status(a):
     add_status_option(load_ids(), a.project, a.name, a.color, a.description, a.before, a.dry_run)
 
 
-# ---- management view: yonetim-esitle -------------------------------------------------------------------------------------
-LABEL = "yonetim-takibi"
+# ---- management view: sync-management -------------------------------------------------------------------------------------
+LABEL = "management-takibi"
 LABEL_COLOR = "5319E7"
 LABEL_DESC = "Yönetimin ilerlemesini takip ettiği iş"
 YT_TITLE = "Yönetim Takibi"
 YT_PCT = "İlerleme %"
 YT_NOTE = "Not"
-YT_UPDATED = "Son güncelleme"   # the built-in "Updated" field is not offered on new projects, so the sync fills this date
-YT_VIEWS = (("Tablo", "table"), ("Pano", "board"))   # (name, layout) of the views the project must have
+YT_UPDATED = "Last güncelleme"   # the built-in "Updated" field is not offered on new projects, so the sync fills this date
+YT_VIEWS = (("Table", "table"), ("Clipboard", "board"))   # (name, layout) of the views the project must have
 NO_CHECKLIST = "checklist yok"
 CLOSED_DAYS = 30
-SHARED_PROJECT = int(os.environ.get("GH_BOARD_TEST_KUYRUGU") or 0)   # config key: number of the org test-queue project (0 = none); never a source for the management Status
+SHARED_PROJECT = int(os.environ.get("GH_BOARD_TEST_QUEUE") or 0)   # config key: number of the org test-queue project (0 = none); never a source for the management Status
 YT_STATUSES = ["Todo", "In Progress", "In review", "Done"]   # same names as the product boards, so the product Status maps 1:1
 
 CHECKBOX = re.compile(r"^(?:[-*+]|\d+[.)])\s+\[([ xX])\](?:\s|$)")
@@ -334,7 +334,7 @@ def checklist_counts(body):
     return done, total
 
 
-def yonetim_hesapla(issue):
+def compute_management(issue):
     """(percent, note, Status name) for one issue dict from NODES_Q. The single % rule:
     closed issue or a product-board Status Done = 100 (Status comes only from product boards: the management project and the shared test-queue project are ignored); else (checked boxes + sum of the sub-issues' own % / 100) /
     (all boxes + number of sub-issues), recursive over the fetched sub-issue levels (deeper levels count closed/open as 1/0);
@@ -353,7 +353,7 @@ def yonetim_hesapla(issue):
     else:
         for child in fetched:
             child["_self_project"] = issue.get("_self_project")
-            done, total = done + yonetim_hesapla(child)[0] / 100, total + 1
+            done, total = done + compute_management(child)[0] / 100, total + 1
         total += max(0, summary["total"] - len(fetched))   # sub-issues beyond the fetched page count as not started
     if not total:
         return 0, NO_CHECKLIST, status
@@ -370,7 +370,7 @@ YT_FIELDS_Q = """query($p:ID!){node(id:$p){...on ProjectV2{fields(first:50){node
 YT_ITEMS_Q = """query($p:ID!,$c:String){node(id:$p){...on ProjectV2{items(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{id
   content{...on Issue{id url}}
   pct:fieldValueByName(name:"İlerleme %"){...on ProjectV2ItemFieldNumberValue{number}}
-  upd:fieldValueByName(name:"Son güncelleme"){...on ProjectV2ItemFieldDateValue{date}}
+  upd:fieldValueByName(name:"Last güncelleme"){...on ProjectV2ItemFieldDateValue{date}}
   note:fieldValueByName(name:"Not"){...on ProjectV2ItemFieldTextValue{text}}
   status:fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{optionId}}}}}}}"""
 
@@ -381,7 +381,7 @@ def ensure_labels(dry):
     for r in repos:
         if dry:
             continue
-        p = gizli.run(["gh", "api", "-X", "POST", f"repos/{OWNER}/{r}/labels", "-f", f"name={LABEL}", "-f", f"color={LABEL_COLOR}",
+        p = hidden.run(["gh", "api", "-X", "POST", f"repos/{OWNER}/{r}/labels", "-f", f"name={LABEL}", "-f", f"color={LABEL_COLOR}",
                             "-f", f"description={LABEL_DESC}"], capture_output=True, text=True, encoding="utf-8")
         if p.returncode == 0:
             made += 1
@@ -482,7 +482,7 @@ def confirm_removals(candidates):
     return keep
 
 
-def cmd_yonetim_esitle(a):
+def sync_cmd_management(a):
     g, _ = rates()
     if g["remaining"] < MIN_GQL and not a.dry_run:
         sys.exit(f"GraphQL remaining {g['remaining']} < {MIN_GQL}; stopping")
@@ -498,7 +498,7 @@ def cmd_yonetim_esitle(a):
                 issues[n["id"]] = n
     if len(issues) != len(wanted):
         sys.exit(f"search found {len(wanted)} issues but {len(issues)} could be read; nothing changed")
-    computed = {nid: yonetim_hesapla(n) for nid, n in issues.items()}
+    computed = {nid: compute_management(n) for nid, n in issues.items()}
     if not boot:
         for nid, (pct, note, st) in computed.items():
             print(f"DRY {issues[nid]['url']} -> {pct}% {st} {note}".rstrip())
@@ -577,24 +577,24 @@ def main():
     t.add_argument("--dry-run", action="store_true")
     t.add_argument("urls", nargs="*")
     t.set_defaults(f=cmd_set)
-    d = s.add_parser("durum-say")
+    d = s.add_parser("status-count")
     d.add_argument("--project", type=int, required=True)
-    d.set_defaults(f=cmd_durum_say)
+    d.set_defaults(f=cmd_status_count)
     it = s.add_parser("items")
     it.add_argument("--status", required=True)
     it.add_argument("--project", type=int, action="append")
     it.set_defaults(f=cmd_items)
-    e = s.add_parser("durum-ekle")
+    e = s.add_parser("add-status")
     e.add_argument("--project", type=int, required=True)
     e.add_argument("name")
     e.add_argument("--color", default="GRAY")
     e.add_argument("--description", default="")
     e.add_argument("--before", help="insert in front of this existing option instead of at the end")
     e.add_argument("--dry-run", action="store_true")
-    e.set_defaults(f=cmd_durum_ekle)
-    y = s.add_parser("yonetim-esitle")
+    e.set_defaults(f=add_cmd_status)
+    y = s.add_parser("sync-management")
     y.add_argument("--dry-run", action="store_true")
-    y.set_defaults(f=cmd_yonetim_esitle)
+    y.set_defaults(f=sync_cmd_management)
     a = p.parse_args()
     if a.cmd != "rate" and not OWNER:
         sys.exit("gh_board: GH_ORG is not set (the GitHub org that owns the project boards; README, Configuration)")

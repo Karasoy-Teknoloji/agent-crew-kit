@@ -8,8 +8,8 @@ We acknowledge a report within 5 working days and keep you posted until it is fi
 
 ## Scope
 
-The code in this repository: the installers, hooks, status line scripts and tools (for example `tools/kasa.py`, `tools/kanit_kancasi.py`, `tools/gh_sinir.py`, `tools/veri-maskeleme/kirp.py`). Problems in Claude Code itself go to Anthropic; problems in Vault, GitHub or other services go to their vendors.
+The code in this repository: the installers, hooks, status line scripts and tools (for example `tools/vault.py`, `tools/evidence_hook.py`, `tools/gh_limit.py`, `tools/data-masking/kirp.py`). Problems in Claude Code itself go to Anthropic; problems in Vault, GitHub or other services go to their vendors.
 
 ## Secrets
 
-This kit is built so secret values never reach output (`kasa.py` redacts them). If you find a way to make a value appear in output, logs or the model context, that is a vulnerability: report it as above.
+This kit is built so secret values never reach output (`vault.py` redacts them). If you find a way to make a value appear in output, logs or the model context, that is a vulnerability: report it as above.
