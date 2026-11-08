@@ -104,11 +104,11 @@ class AgentLink(unittest.TestCase):
         agents = self.claude / "agents"
         agents.mkdir(parents=True)
         (agents / "own-agent.md").write_text("mine", encoding="utf-8")
-        (agents / "alt").mkdir()
-        (agents / "alt" / "x.md").write_text("mine", encoding="utf-8")
+        (agents / "sub").mkdir()
+        (agents / "sub" / "x.md").write_text("mine", encoding="utf-8")
         self.run_cmd()
         self.run_cmd(remove=True)
-        self.assertEqual(sorted(p.name for p in agents.iterdir()), ["alt", "own-agent.md"])
+        self.assertEqual(sorted(p.name for p in agents.iterdir()), ["own-agent.md", "sub"])
         self.assertEqual((agents / "own-agent.md").read_text(encoding="utf-8"), "mine")
 
     def test_a_real_directory_with_the_name_is_left_alone(self):
