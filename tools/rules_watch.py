@@ -13,7 +13,7 @@ they are untrusted. They are shown to the human only (`systemMessage`, control c
 length capped). The model (`additionalContext`) gets fixed wording, counts and the configured
 watch directories only, never free text from git.
 
-quota-pace in repodan mode (`install.sh --repodan` / `install.ps1 -Repodan` wrote ~/.claude/quota-pace.json): the status line and hooks
+quota-pace in direct mode (`install.sh --direct` / `install.ps1 -Direct` wrote ~/.claude/quota-pace.json): the status line and hooks
 run straight from a claude-shared clone, so this hook also keeps that clone up to date: fast-forward of its current branch, the
 installer's quick self-check when the pull touched what it runs, and a reset to the previous commit when the check fails.
 
@@ -47,10 +47,10 @@ REPO = Path(__file__).resolve().parent.parent
 # Paths whose changes on main are reported; override with RULES_WATCH_PATHS="a,b".
 WATCH = [p.strip() for p in os.environ.get("RULES_WATCH_PATHS", "").split(",") if p.strip()] \
     or ["rules", "plugins/quota-pace"]
-QUOTA = "plugins/quota-pace"  # installed into ~/.claude by install.sh/install.ps1: needs a re-run after a merge (not in repodan mode)
+QUOTA = "plugins/quota-pace"  # installed into ~/.claude by install.sh/install.ps1: needs a re-run after a merge (not in direct mode)
 QUOTA_STATUS = Path.home() / ".claude" / "quota-pace.json"  # the installer's mode record (install_common.py DURUM)
 QUOTA_LOCK = Path.home() / ".claude" / "quota-pace.lock"  # one auto-update at a time when several sessions start together
-QUOTA_PATHS = [QUOTA, "plugins/crew-agents/tools"]          # what the repodan install runs from the clone
+QUOTA_PATHS = [QUOTA, "plugins/crew-agents/tools"]          # what the direct install runs from the clone
 # Self-check limit in seconds (normally 2-5 s). Worst case of the whole update: fetch 10 + merge 10 + check 30 + reset 10.
 PROBE_DURATION = int(os.environ.get("RULES_WATCH_PROBE_DURATION") or 30)
 LOST = REPO / "tools" / "lost_work.py"                      # lost-work scan; started in the background, never waited for
@@ -110,13 +110,13 @@ def git(*args, timeout=10):
     return out if rc == 0 else ""
 
 
-def repodan_mode():
-    """The quota-pace install record when it is in repodan mode, else None."""
+def direct_mode():
+    """The quota-pace install record when it is in direct mode, else None."""
     try:
         d = json.loads(QUOTA_STATUS.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not (isinstance(d, dict) and d.get("mode") == "repodan" and isinstance(d.get("repo"), str) and isinstance(d.get("python"), str)
+    if not (isinstance(d, dict) and d.get("mode") == "direct" and isinstance(d.get("repo"), str) and isinstance(d.get("python"), str)
             and isinstance(d.get("argv"), list) and all(isinstance(x, str) for x in d["argv"])):
         return None
     return d
@@ -160,7 +160,7 @@ def quota_setting(mode):
 
 
 def quota_update(mode, state):
-    """Bring the repodan clone up to date (see the module docstring). Returns (note for the human, fixed-wording context), each
+    """Bring the direct clone up to date (see the module docstring). Returns (note for the human, fixed-wording context), each
     None when there is nothing to say. Skips silently when tracked files have uncommitted changes, HEAD is detached, the branch
     has no remote upstream, the pull is not a fast-forward, the network is slow, or another session is updating."""
     repo = Path(mode["repo"])
@@ -240,7 +240,7 @@ def _quota_update(repo, mode, state):
 def align_main_with(mode, state):
     """Keep a clone that is not on main in step with origin/main (see the module docstring). Returns the note for the human, or
     None. Fast-forward only: a branch with its own commits, a dirty tracked tree or a detached HEAD is left alone (the diverged
-    branch gets a one-line hint). With a repodan install that runs from this clone, a fast-forward that touches what the install
+    branch gets a one-line hint). With a direct install that runs from this clone, a fast-forward that touches what the install
     runs gets the same self-check and rollback as quota_update."""
     rc, branch = run_git(REPO, "symbolic-ref", "-q", "--short", "HEAD")
     if rc != 0 or not branch or branch == "main":
@@ -520,7 +520,7 @@ def refresh_rules(old):
     if FETCH_CLOSED and not old.get("identity"):   # once; git config is the user's own, never changed here
         notes.append("git credential.helper bu makinede 'helper-selector' (veya boş): ağ çağrıları atlanıyor, kural güncellemeleri gelmez ve "
                      "Windows'ta seçici penceresi açılabilir. Düzeltme: git config --global credential.helper manager")
-    mode = repodan_mode()
+    mode = direct_mode()
     if mode:
         try:
             note, info = quota_update(mode, state)

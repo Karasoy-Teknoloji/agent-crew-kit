@@ -527,7 +527,7 @@ class QuotaAutoUpdateTest(GitFixture):
         self.calls = self.claude / "probe-calls.jsonl"
         py = sys.executable.replace("\\", "/")
         (self.claude / "quota-pace.json").write_text(json.dumps({
-            "mode": "repodan", "repo": self.clone.as_posix(), "python": py, "argv": ["--python", py, "--repodan"]}), encoding="utf-8")
+            "mode": "direct", "repo": self.clone.as_posix(), "python": py, "argv": ["--python", py, "--direct"]}), encoding="utf-8")
         self.env["RULES_WATCH_PROBE_DURATION"] = "3"
         self.run_hook()   # records the state; nothing to pull yet
 
@@ -547,10 +547,10 @@ class QuotaAutoUpdateTest(GitFixture):
         self.commit(self.origin, "kota v2", files={"plugins/quota-pace/yeni.txt": "x\n"})
         out = self.run_hook()
         self.assertEqual(self.head(self.clone), self.head(self.origin))
-        self.assertEqual(self.probe_calls(), [["--python", sys.executable.replace("\\", "/"), "--repodan", "--probe"]])
-        self.assertIn(["--python", sys.executable.replace("\\", "/"), "--repodan", "--setting"], self.setting_calls())
+        self.assertEqual(self.probe_calls(), [["--python", sys.executable.replace("\\", "/"), "--direct", "--probe"]])
+        self.assertIn(["--python", sys.executable.replace("\\", "/"), "--direct", "--setting"], self.setting_calls())
         self.assertNotIn("auto-update", json.dumps(out))
-        self.assertNotIn("rerun", json.dumps(out))                  # no "rerun install.sh" hint in repodan mode
+        self.assertNotIn("rerun", json.dumps(out))                  # no "rerun install.sh" hint in direct mode
 
     def test_update_outside_the_plugin_is_pulled_without_a_check(self):
         self.commit(self.origin, "rules only", files={"rules/C.md": "c\n"})
@@ -612,7 +612,7 @@ class QuotaAutoUpdateTest(GitFixture):
     def test_copy_mode_and_a_broken_record_never_pull(self):
         old = self.head(self.clone)
         self.commit(self.origin, "kota v2", files={"plugins/quota-pace/mode.txt": "bad\n"})
-        for record in ('{"mode": "copy"}', "not json", '{"mode": "repodan", "repo": 5}'):
+        for record in ('{"mode": "copy"}', "not json", '{"mode": "direct", "repo": 5}'):
             (self.claude / "quota-pace.json").write_text(record, encoding="utf-8")
             self.run_hook()
             self.assertEqual(self.head(self.clone), old)
@@ -684,7 +684,7 @@ class PersonalBranchTest(GitFixture):
         old = self.head()
         self.advance_main("rules change", {"rules/B.md": "b\n"})
         out = self.run_hook()
-        self.assertEqual(self.head(), old)   # main is not touched here (only the repodan update moves it)
+        self.assertEqual(self.head(), old)   # main is not touched here (only the direct update moves it)
         self.assertNotIn("fast-forwarded", json.dumps(out))
         self.assertNotIn("behind main", json.dumps(out))
 

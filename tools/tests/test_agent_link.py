@@ -154,7 +154,7 @@ class QuotaSettingNote(unittest.TestCase):
         cls.rw = load("rules_watch_bag", RW)
 
     def setting(self, output, rc=0):
-        mode = {"repo": str(CLONE), "python": sys.executable, "argv": ["--repodan"]}
+        mode = {"repo": str(CLONE), "python": sys.executable, "argv": ["--direct"]}
         with unittest.mock.patch.object(self.rw, "run", return_value=(rc, output)):
             return self.rw.quota_setting(mode)
 
