@@ -111,7 +111,7 @@ The people list of the shared usage repo (`people.json`):
 }
 ```
 
-Roles: `developer` (developer: picks board work), `tester` (tester), `manager` (management).
+Roles: `developer` (developer: picks board work), `tester` (tester), `manager` (management). The short form `"github-login": "Display Name"` is a developer. Any other role value, or an object without `role`, is "no known role" and fails closed: that person never picks board work or owns triage, the ranking lists them under "no known role (takes no work)", and the job logs a warning.
 
 ### Team fork
 

@@ -1918,7 +1918,7 @@ def cmd_burn(a):
         return 3
     if role != "developer":
         print("Refused: only developers (people.json `role: developer`) may switch burn mode on or off. "
-              "GitHub login '%s' %s." % (login, "is not in people.json" if not name else "has role: %s" % role))
+              "GitHub login '%s' %s." % (login, "is not in people.json" if not name else "has role: %s" % (role or "no known role")))
         write_log("burn mode %s refused for %s (role %s)" % (a.operation, login, role))
         return 3
     b = read_burn()

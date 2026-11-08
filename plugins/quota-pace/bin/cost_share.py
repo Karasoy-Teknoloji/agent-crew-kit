@@ -793,17 +793,18 @@ def work_order(person_lines, today, roles=None):
     """Who takes the next piece of work (rules/WORKING-RULES.md, "Who picks next"): (order, outside).
     order = names that may take work, best first: pace mode PLENTY before NORMAL, then the lowest forecast % at the target
     ("Forecast"; the weekly % when there is no forecast), then the name. outside = [(name, reason)] of the people who never take
-    work: role tester or manager in people.json (only developers take board work), mode TIGHT, weekly use at 100 %, or no leaderboard
-    data (no row in the last 7 days, or no mode / weekly %). roles: {name: role} (default: read_roles() of this clone; a name
-    without a role is a developer). The single ranking used by the leaderboard and by the triage job's owner lease."""
+    work: any role other than developer in people.json (tester, manager, or no known role: fail closed), mode TIGHT, weekly use at
+    100 %, or no leaderboard data (no row in the last 7 days, or no mode / weekly %). roles: {name: role} (default: read_roles() of
+    this clone; a name that is missing there or has no known role takes no work). The single ranking used by the leaderboard and by
+    the triage job's owner lease."""
     roles = read_roles() if roles is None else roles
     order, outside = [], []
     seen = set()
     for r in compute_ranking(person_lines, today):
         seen.add(r["person"])
         mode = (r.get("mode") or "").upper()
-        if roles.get(r["person"]) in NO_WORK_ROLES:
-            outside.append((r["person"], NO_WORK_ROLES[roles[r["person"]]]))
+        if not is_developer(roles, r["person"]):
+            outside.append((r["person"], no_work_note(roles, r["person"])))
         elif not mode or r.get("quota") is None:
             outside.append((r["person"], "no data"))
         elif mode not in MODE_ORDER:
@@ -813,7 +814,7 @@ def work_order(person_lines, today, roles=None):
         else:
             t = r.get("forecast") if r.get("forecast") is not None else r["quota"]
             order.append((MODE_ORDER[mode], t, r["person"]))
-    outside += [(k, NO_WORK_ROLES.get(roles.get(k), "no data")) for k in sorted(person_lines) if k not in seen]
+    outside += [(k, "no data" if is_developer(roles, k) else no_work_note(roles, k)) for k in sorted(person_lines) if k not in seen]
     return [k for _, _, k in sorted(order)], outside
 
 
@@ -965,8 +966,8 @@ MODE_RANK = {"PLENTY": 0, "NORMAL": 1, "TIGHT": 2}
 def upcoming_work_lines(order, roles=None):
     """"Who picks next" section (WORKING-RULES, hand-overs return work to the board: the most unused quota picks next):
     developers ordered by pace mode (PLENTY, NORMAL, TIGHT), then by lowest forecast %; no mode or forecast = last, marked "no data".
-    Testers and managers (roles tester, manager; roles as in work_order) never take board work: they are listed under a
-    "tester (takes no work)" / "manager (takes no work)" note."""
+    Everyone who is not a developer (roles as in work_order) never takes board work: testers, managers and names without a known
+    role are listed under a "tester (takes no work)" / "manager (takes no work)" / "no known role (takes no work)" note."""
     roles = read_roles() if roles is None else roles
 
     def key(r):
@@ -975,11 +976,12 @@ def upcoming_work_lines(order, roles=None):
     L = ["", "### Who picks next", "",
          "Handed-over work returns to the board; only developers pick from the board, the one with the most unused quota first: mode first (PLENTY, NORMAL, TIGHT), then the lowest forecast %.", "",
          "| # | Person | Mode | Forecast |", "|---|---|---|---:|"]
-    for i, r in enumerate(sorted((r for r in order if roles.get(r["person"]) not in NO_WORK_ROLES), key=key), 1):
+    for i, r in enumerate(sorted((r for r in order if is_developer(roles, r["person"])), key=key), 1):
         data = r.get("mode") in MODE_RANK and r.get("forecast") is not None
         L.append("| %d | %s | %s | %s |" % (i, r["person"].split()[0], r["mode"] if data else "no data", "%d%%" % r["forecast"] if data else "—"))
     for role, not_ in NO_WORK_ROLES.items():
-        names = [r["person"].split()[0] for r in sorted(order, key=lambda r: r["person"]) if roles.get(r["person"]) == role]
+        names = [r["person"].split()[0] for r in sorted(order, key=lambda r: r["person"])
+                 if not is_developer(roles, r["person"]) and no_work_note(roles, r["person"]) == not_]
         if names:
             L += ["", "_%s: %s_" % (not_, ", ".join(names))]
     return L
@@ -1116,20 +1118,37 @@ def prepare_clone(clone, remote):
 
 
 ROLES = ("developer", "tester", "manager")   # people.json roles; only "developer" takes board work and owns triage
-NO_WORK_ROLES = {"tester": "tester (takes no work)", "manager": "manager (takes no work)"}   # roles that never take work, with their note
+# every other role, with its note; None = no known role (missing from people.json, or a role value outside ROLES): fails closed
+NO_WORK_ROLES = {"tester": "tester (takes no work)", "manager": "manager (takes no work)", None: "no known role (takes no work)"}
+
+
+def is_developer(roles, name):
+    """Whether `name` may take board work and own triage: only an exact "developer" role does (fail closed)."""
+    return roles.get(name) == "developer"
+
+
+def no_work_note(roles, name):
+    """The note of a name that takes no work: its role's note, or the no-known-role note."""
+    return NO_WORK_ROLES.get(roles.get(name) if roles.get(name) in ROLES else None)
 
 
 def person_parse(data):
     """{github login (lower case): (display name, role)} from parsed people.json, the single parser of that file. An entry is either
-    "Name" (short format = role developer) or {"name": "Name", "role": "developer"|"tester"|"manager"}; a missing or
-    unknown role is developer. Invalid entries are skipped; {} when `data` is not an object."""
+    "Name" (short format = role developer) or {"name": "Name", "role": "developer"|"tester"|"manager"}. In the object format a
+    missing or unknown role is None ("no known role": never takes board work or owns triage, fail closed) and is logged as a
+    warning. Invalid entries are skipped; {} when `data` is not an object."""
     if not isinstance(data, dict):
         return {}
     out = {}
     for l, v in data.items():
         name, role = (v, None) if isinstance(v, str) else ((v.get("name"), v.get("role")) if isinstance(v, dict) else (None, None))
         if isinstance(l, str) and isinstance(name, str) and clean_name(name):
-            out[l.lower()] = (clean_name(name), role if role in ROLES else "developer")
+            if isinstance(v, str):
+                role = "developer"
+            elif role not in ROLES:
+                write_log("warning: people.json: %s has no known role (%r; known: %s); takes no work" % (clean(l, 60), clean(str(role), 40), ", ".join(ROLES)))
+                role = None
+            out[l.lower()] = (clean_name(name), role)
     return out
 
 
