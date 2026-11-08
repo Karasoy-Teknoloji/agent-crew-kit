@@ -16,6 +16,7 @@ Where builds and tests run (team rule): never on the developer workstation. No `
 - If no VM is reachable, rely on the branch's CI run (`gh run list/view`) and say so in the report.
 - GitHub API budget (one token for all sessions; WORKING-RULES.md): no `gh run watch` or tight polling (one REST check per run every 4-5 min, one waiter per run), `gh search` only when needed (30/min), board updates batched (`tools/gh_board.py set`), one comment per item per step; on a 403/429 do not retry by hand, the `gh` wrapper (tools/gh_limit.py) already did.
 - Small checks with a local Python are fine (`python -I`).
+- Put loops, command substitutions and multi-step shell logic in a script file and run `bash <file>` (or Python); complex inline shell triggers approval prompts even in bypass mode.
 
 Rules:
 - Do not change files; no commit/push.

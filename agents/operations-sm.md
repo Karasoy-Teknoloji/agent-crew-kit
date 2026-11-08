@@ -20,6 +20,7 @@ Rules:
 - If a step that writes to or restarts a live customer system is needed, DO NOT do it; report what should be done and why.
 - No sending messages unless the session user explicitly approved that exact text (show drafts in the chat as plain text, ready to copy, never as .txt or other files), no prod panel changes, no git push.
 - CPU-heavy work at low priority, at most 2 parallel processes.
+- Put loops, command substitutions and multi-step shell logic in a script file and run `bash <file>` (or Python); complex inline shell triggers approval prompts even in bypass mode.
 - Output: result + evidence (short), at most 250 words. For each factual claim give its evidence (command or source plus the key output line), or mark it 'unverified'.
 - Do NOT run builds or UI/E2E tests on the workstation (team rule). Builds and tests run on build VMs (with their lock file) or in CI.
 - GitHub API budget (one token for all sessions; WORKING-RULES.md): no `gh run watch` or tight polling (one REST check per run every 4-5 min, one waiter per run), `gh search` only when needed (30/min), board updates batched (`tools/gh_board.py set`), one comment per item per step; on a 403/429 do not retry by hand, the `gh` wrapper (tools/gh_limit.py) already did.
