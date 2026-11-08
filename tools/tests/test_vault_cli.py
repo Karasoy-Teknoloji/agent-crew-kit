@@ -291,7 +291,7 @@ class WriteTests(unittest.TestCase):
             sys.stdin = old
 
     def test_not_secret_subcommand_run_stops_redacting_only_that_field(self):
-        RECORDS["w/rec"] = {"user": "9876543210", "password": "pw-Secret-4321"}
+        RECORDS["w/rec"] = {"user": "9876543210", "password": "pw-VALUE-4321"}
         META.pop("w/rec", None)
         code = "import os;print(os.environ['USR']);print(os.environ['PASSWORD'])"
         argv = ["run", "--env", "USR=secret/w/rec#user", "--env", "PASSWORD=secret/w/rec#password", "--", sys.executable, "-c", code]
@@ -303,7 +303,7 @@ class WriteTests(unittest.TestCase):
         self.assertEqual(RECORDS["w/rec"]["user"], "9876543210")   # data untouched
         rc, out, _ = self.run_child(argv)
         self.assertEqual(out.decode().split(), ["9876543210", "***"])   # only the marked field is shown, password still masked
-        self.assertNotIn(b"pw-Secret-4321", out)
+        self.assertNotIn(b"pw-VALUE-4321", out)
         rc, _, err = self.run_main(["not-secret", "secret/w/rec#nope"])
         self.assertEqual(rc, 3)
         self.assertIn("field not found", err)

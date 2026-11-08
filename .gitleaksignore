@@ -1,0 +1,2 @@
+# Dummy test value ("password": "pw-...") introduced by the English rename commit; replaced by a non-matching dummy in the next commit.
+ecf9f06fa61c1ea5d0b7c1c8325c3977b2c8a298:tools/tests/test_vault.py:generic-api-key:294
