@@ -115,7 +115,7 @@ Roles: `developer` (developer: picks board work), `tester` (tester), `manager` (
 
 ### Team fork
 
-A team can run its own fork of this kit and merge kit `main` into it. It keeps its values in committed `team-config/<file>` files (keys above) instead of editing shared code. If the fork ships `tools/team_migrate.py`, the installer and the `rules_watch.py` background run call `team_migrate.py --ensure` first (before the saved install record or `quota-pace.json` is read), with a timeout. The call fails open: a failure or a timeout is reported and the install or update goes on. The kit itself ships no such script.
+A team can run its own fork of this kit and merge kit `main` into it. It keeps its values in committed `team-config/<file>` files (keys above) instead of editing shared code. If the fork ships `tools/team_migrate.py`, the installer and the `rules_watch.py` background run call `team_migrate.py --ensure` first (before the saved install record or `quota-pace.json` is read), with a timeout. The call fails open: a failure or a timeout is reported and the install or update goes on. After a background pull that moved HEAD, the hook runs once more so a migration that arrived with the pull applies in the same cycle. The script must be idempotent (it can run many times, also right after it finished). The kit serializes runs with a lock file (`~/.claude/team-migrate.lock`, taken over after the timeout plus 30 s): a second caller skips the migration with a one-line note. The kit itself ships no such script.
 
 ### Usage ranking (optional)
 

@@ -75,9 +75,10 @@ class TeamMigrate(unittest.TestCase):
         self.d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.d, True)
         self.script = os.path.join(self.d, "team_migrate.py")
-        p = mock.patch.object(settings, "MIGRATE", self.script)
-        p.start()
-        self.addCleanup(p.stop)
+        self.lock = os.path.join(self.d, "claude", "team-migrate.lock")
+        for p in (mock.patch.object(settings, "MIGRATE", self.script), mock.patch.object(settings, "LOCK", self.lock)):
+            p.start()
+            self.addCleanup(p.stop)
 
     def write(self, body):
         with open(self.script, "w", encoding="utf-8") as f:
@@ -108,6 +109,48 @@ class TeamMigrate(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         self.assertIn("no result within 1 s", lines[0])
 
+    def hold(self, age=0):
+        os.makedirs(os.path.dirname(self.lock), exist_ok=True)
+        with open(self.lock, "w") as f:
+            f.write("x")
+        if age:
+            t = os.stat(self.lock).st_mtime - age
+            os.utime(self.lock, (t, t))
+
+    def test_held_lock_skips_the_run(self):
+        self.write("print('ran')\n")
+        self.hold()
+        lines = settings.team_migrate()
+        self.assertEqual(len(lines), 1)
+        self.assertIn("already running elsewhere", lines[0])
+        self.assertTrue(os.path.exists(self.lock))   # not ours: left alone
+
+    def test_stale_lock_is_taken_over(self):
+        self.write("print('ran')\n")
+        self.hold(age=settings.MIGRATE_TIMEOUT + settings.LOCK_GRACE + 5)
+        self.assertEqual(settings.team_migrate(), ["ran"])
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_lock_age_follows_the_given_timeout(self):
+        self.write("print('ran')\n")
+        self.hold(age=settings.LOCK_GRACE + 5)   # fresh for the default timeout, stale for timeout=1
+        self.assertIn("already running", settings.team_migrate()[0])
+        self.assertEqual(settings.team_migrate(timeout=1), ["ran"])
+
+    def test_lock_released_after_success_failure_and_timeout(self):
+        for body, kw in (("pass\n", {}), ("import sys\nsys.exit(3)\n", {}), ("import time\ntime.sleep(30)\n", {"timeout": 1})):
+            self.write(body)
+            settings.team_migrate(**kw)
+            self.assertFalse(os.path.exists(self.lock), body)
+        self.write("print('again')\n")
+        self.assertEqual(settings.team_migrate(), ["again"])
+
+    def test_lock_released_when_the_launch_fails(self):
+        self.write("pass\n")
+        with mock.patch.object(settings.hidden, "run", side_effect=OSError("boom")):
+            self.assertIn("could not start", settings.team_migrate()[0])
+        self.assertFalse(os.path.exists(self.lock))
+
 
 class Wiring(unittest.TestCase):
     """The installer and the rules_watch background run call the hook before they read their install record."""
@@ -126,6 +169,16 @@ class Wiring(unittest.TestCase):
         s = self.src("tools", "rules_watch.py")
         body = s[s.index("\ndef refresh_rules("):]
         self.assertLess(body.index("settings.team_migrate()"), body.index("direct_mode()"))
+
+    def test_rules_watch_migrates_again_after_the_pull_and_before_quota_setting(self):
+        """A migration that arrives with the pull runs in the same cycle, not one cycle late."""
+        s = self.src("tools", "rules_watch.py")
+        body = s[s.index("\ndef refresh_rules("):]
+        pull = body.index("quota_update(mode, state)")
+        again = body.index("migrate()", pull)
+        self.assertLess(pull, again)
+        self.assertLess(again, body.index("quota_setting(mode)"))
+        self.assertLess(body.index("head_before"), pull)   # only when HEAD moved
 
 
 if __name__ == "__main__":
