@@ -561,7 +561,7 @@ def gh_login():
 
 
 def tools_dir(clone=None):
-    """Directory of the kit's tools (gh_board.py): the clone this plugin sits in (a --repodan install, or a
+    """Directory of the kit's tools (gh_board.py): the clone this plugin sits in (a --direct install, or a
     run from the repo), else the job's own clone refreshed from origin."""
     candidate = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "..", "..", "tools"))
     if os.path.isfile(os.path.join(candidate, "gh_board.py")):

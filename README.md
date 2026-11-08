@@ -115,6 +115,19 @@ With a shared repo configured, `install.sh --share --plan 100` (Windows `install
 
 The installer keeps three opt-in flags whose scripts are not part of this kit: `--slack-inbox` (token-free Slack inbox poller), `--slack-triage` (turns free-text Slack/mail requests into GitHub issues) and `--stale` (daily stale-branch cleanup with a report). They run a team's own `tools/slack-triage/` folder. Without it the installer stops that option with a clear message and changes nothing else.
 
+### Add-on contract
+
+An add-on placed in `tools/slack-triage/` must use exactly these names; the installer, the status line and the cost report look for them.
+
+| What | Required name |
+|---|---|
+| Inbox poller (`--slack-inbox`) | `inbox.py` with the commands `poll`, `read`, `count`; `slack-inbox` (the `~/.claude/bin/slack-inbox` link target); `systemd/slack-inbox.service` and `systemd/slack-inbox.timer` |
+| Stale-branch job (`--stale`) | `stale.py` with the command `runlog <state dir> <log file>`; `systemd/stale.service` and `systemd/stale.timer` |
+| Triage runner (`--slack-triage`) | `task.py`, `run_cmd.sh`, `config.example`, `window.py`; `systemd/slack-triage.service` and `systemd/slack-triage.timer` |
+| Environment variables | `SLACK_INBOX_INBOX` (inbox file), `SLACK_INBOX_DATA` (state folder), `SLACK_TRIAGE_CONFIG` (triage config file) |
+| State paths | `~/.claude/slack-inbox.jsonl` (inbox), `~/.local/state/slack-inbox/state.json` (poll state), `~/.claude/slack-inbox.conf` (Windows settings), `~/.config/slack-triage/config` (triage config) |
+| Unit and task names | systemd user units `slack-inbox`, `stale`, `slack-triage`; launchd label `com.agentcrewkit.slack-inbox`; Windows tasks `slack-inbox`, `slack-triage` |
+
 ## Tests
 
 ```

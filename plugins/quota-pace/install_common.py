@@ -853,7 +853,7 @@ def unit_q(p):
 
 
 def clean_old_dropin(dropin_dir, claude, home, tag):
-    """An old manual drop-in (`cost-daily.service.d/paylas.conf`, the old name, or any other *.conf there) whose ExecStart runs a script under
+    """An old manual drop-in (`cost-daily.service.d/*.conf`) whose ExecStart runs a script under
     ~/.claude/bin/ breaks once the direct-source install removes that copy. Back it up (.backup-<date>), remove it, and say so in one
     line. Drop-ins that run anything else are left alone. Returns True when one was found (the caller does the daemon-reload)."""
     kok = os.path.normpath(str(claude / "bin"))

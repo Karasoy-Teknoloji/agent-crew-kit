@@ -5,7 +5,7 @@ Prints nothing when everything is unchanged, so it costs no tokens on a quiet st
 
 Speed: the hook (main) makes no git call, no network call and starts no scan: it reads the cache file of tools/lost_work_cache.py, shows the
 result of the LAST background run once (target: under 0.5 s, mostly Python startup; heavy imports are lazy) and starts the run when needed. Everything slow (fetch, the pull + self-check + rollback below, the branch sync, the
-lost-work scan, the self-heal of the daily job) is ONE detached run, `rules_watch.py --refresh`, started when the stored result is older
+lost-work scan) is ONE detached run, `rules_watch.py --refresh`, started when the stored result is older
 than RULES_OLD or missing; the lock and the cache file are lost_work_cache's. So a rule update appears one session later than it arrives.
 
 Trust model: commit authors, subjects and file names are written by anyone with push access, so
@@ -48,7 +48,7 @@ REPO = Path(__file__).resolve().parent.parent
 WATCH = [p.strip() for p in os.environ.get("RULES_WATCH_PATHS", "").split(",") if p.strip()] \
     or ["rules", "plugins/quota-pace"]
 QUOTA = "plugins/quota-pace"  # installed into ~/.claude by install.sh/install.ps1: needs a re-run after a merge (not in direct mode)
-QUOTA_STATUS = Path.home() / ".claude" / "quota-pace.json"  # the installer's mode record (install_common.py DURUM)
+QUOTA_STATUS = Path.home() / ".claude" / "quota-pace.json"  # the installer's mode record (install_common.py mode record)
 QUOTA_LOCK = Path.home() / ".claude" / "quota-pace.lock"  # one auto-update at a time when several sessions start together
 QUOTA_PATHS = [QUOTA, "plugins/crew-agents/tools"]          # what the direct install runs from the clone
 # Self-check limit in seconds (normally 2-5 s). Worst case of the whole update: fetch 10 + merge 10 + check 30 + reset 10.
@@ -296,7 +296,7 @@ def age_text(sec):
 
 def start_background():
     """Start ONE detached background run (`rules_watch.py --refresh`: fetch, claude-shared pull with its self-check and rollback, the
-    lost_work scan, the task self-heal) and do not wait for it. The lock (lost_work_cache, the same one the daily job takes) is taken here and
+    lost_work scan) and do not wait for it. The lock (lost_work_cache, the same one the daily job takes) is taken here and
     released by that run, so sessions and the daily job never refresh in parallel. False when another refresh holds the lock or the
     process cannot start. Windows: DETACHED_PROCESS (no console, outlives the hook) + a new process group; elsewhere a new session. No
     stdio is inherited, so the hook's output pipe closes at once."""
@@ -398,111 +398,6 @@ def fetch_remote(repo, remote):
     return _FETCH[key]
 
 
-# `lost_work.py` but not `daily_lost_work.py` (the second name ends with the first one)
-_LOST_WORK_PY = r"(?<!daily_)lost_work\.py"
-
-
-def new_command(text):
-    """`text` (a task's arguments or a unit's ExecStart value) with the `.../lost_work.py <options>` part replaced by `.../daily_lost_work.py`
-    in the same folder, quoted as before; None when it does not mention lost_work.py."""
-    def instead(m):
-        quoted = m.group(1) is not None
-        folder = m.group(1) if quoted else m.group(2)
-        return ('"%sdaily_lost_work.py"' if quoted else "%sdaily_lost_work.py") % folder
-    new, n = re.subn(r'(?:"([^"]*?)' + _LOST_WORK_PY + r'"|(\S*?)' + _LOST_WORK_PY + r')(?:\s.*)?$', instead, text, count=1, flags=re.S)
-    return new if n else None
-
-
-def _entry_folder(text):
-    m = re.search(r'(?:"([^"]*?)' + _LOST_WORK_PY + r'"|(\S*?)' + _LOST_WORK_PY + r')', text)
-    if not m:
-        return ""
-    return (m.group(1) if m.group(1) is not None else m.group(2)) or ""
-
-
-def _this_repo(folder):
-    """True when `folder` (with trailing separator) is this clone's tools folder: only a task or unit of THIS clone is rewritten."""
-    try:
-        return os.path.samefile(folder or ".", Path(__file__).resolve().parent) and (REPO / "tools" / "daily_lost_work.py").is_file()
-    except OSError:
-        return False
-
-
-def _ps(script, env_extra=None):
-    """(exit code, stdout) of a PowerShell snippet for the current user (no admin). Replaced by tests."""
-    import shutil
-    exe = shutil.which("powershell") or shutil.which("pwsh")
-    if not exe:
-        return -1, ""
-    old = {k: os.environ.get(k) for k in (env_extra or {})}
-    os.environ.update(env_extra or {})
-    try:
-        return run([exe, "-NoProfile", "-NonInteractive", "-Command", script], 60)
-    finally:
-        for k, v in old.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-
-
-TASK_READ_PS = ("$t = Get-ScheduledTask -TaskName 'lost-work' -ErrorAction SilentlyContinue; if (-not $t) { exit 3 }; "
-                "$t.Actions | Select-Object -First 1 | ForEach-Object { $_.Arguments }")
-TASK_WRITE_PS = ("$ErrorActionPreference = 'Stop'; $t = Get-ScheduledTask -TaskName 'lost-work'; "
-                "$t.Actions[0].Arguments = $env:LOST_NEW_ARGS; Set-ScheduledTask -InputObject $t | Out-Null")
-
-
-def fix_task():
-    """One-time self-heal of the daily lost-work job: an install made before tools/daily_lost_work.py embeds `lost_work.py <options>` in the
-    scheduler, so a changed option never reached it. Rewrites the Windows per-user task 'lost-work' (PowerShell, no admin) or the user
-    systemd unit to call the entry script of this clone with no arguments (options live in the clone; no copy in the scheduler).
-    Returns "missing" (no such job of this clone), "already" (already the entry), "ok" (rewritten) or "error" (could not rewrite: the
-    human runs the installer again)."""
-    if not (REPO / "tools" / "daily_lost_work.py").is_file():
-        return "missing"
-    if os.name == "nt":
-        rc, out = _ps(TASK_READ_PS)
-        if rc == 3 or (rc == -1 and not out):
-            return "missing"
-        if rc != 0:
-            return "error"
-        if not re.search(_LOST_WORK_PY, out):
-            return "already" if "daily_lost_work.py" in out else "missing"
-        if not _this_repo(_entry_folder(out)):
-            return "missing"
-        new = new_command(out.strip())
-        if not new:
-            return "error"
-        rc, _ = _ps(TASK_WRITE_PS, {"LOST_NEW_ARGS": new})
-        return "ok" if rc == 0 else "error"
-    base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-    unit = base / "systemd" / "user" / "lost-work.service"
-    try:
-        text = unit.read_text(encoding="utf-8")
-    except OSError:
-        return "missing"
-    lines = text.split("\n")
-    for i, line in enumerate(lines):
-        if line.startswith("ExecStart=") and re.search(_LOST_WORK_PY, line):
-            if not _this_repo(_entry_folder(line)):
-                return "missing"
-            lines[i] = "ExecStart=" + new_command(line[len("ExecStart="):])
-            break
-        if line.startswith("ExecStart=") and "daily_lost_work.py" in line:
-            return "already"
-    else:
-        return "missing"
-    try:
-        lost_work_cache.atomic_write(unit, "\n".join(lines))
-    except OSError:
-        return "error"
-    import shutil
-    if shutil.which("systemctl"):
-        if run(["systemctl", "--user", "daemon-reload"], 30)[0] != 0:
-            return "error"
-    return "ok"
-
-
 def refresh_rules(old):
     """The network and pull part of the hook, run in the background (see the module docstring). Returns the result document: the notes for
     the human (`notes`), the fixed-wording lines for the model (`ctx`), and what the next run needs (`quota_bad`, `upstream_seen`)."""
@@ -592,19 +487,6 @@ def refresh_rules(old):
     doc["upstream_seen"] = upstream or seen
     if state.get("quota_bad"):
         doc["quota_bad"] = state["quota_bad"]   # a commit that failed the quota-pace self-check: not pulled again
-    # one-time self-heal of the daily job; looked at again after a day, or at once after a failure
-    if old.get("heal") in ("ok", "already", "missing") and time.time() - old.get("heal_ts", 0) < 86400:
-        doc["heal"], doc["heal_ts"] = old["heal"], old["heal_ts"]
-    else:
-        try:
-            result = fix_task()
-        except Exception:
-            result = "error"
-        doc["heal"], doc["heal_ts"] = result, doc["ts"]
-        if result == "ok":
-            notes.append("lost-work task updated: it now calls tools/daily_lost_work.py, the options come from the repo (said once).")
-        elif result == "error" and old.get("heal") != "error":   # said once
-            notes.append("lost-work task keeps its old arguments and could not be fixed automatically: run install.ps1 (Windows) / install.sh.")
     doc["notes"], doc["ctx"] = notes, ctx
     return doc
 
