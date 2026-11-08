@@ -4,7 +4,9 @@ Config keys (README, "Configuration"). value(file, env, default) returns the fir
   1. the environment variable `env`;
   2. the first line of ~/.config/claude-shared/<file> (this person's own setting; Windows: USERPROFILE\\.config);
   3. the first line of <clone>/team-config/<file> (committed by a downstream team, so every member gets the team's values
-     with a `git pull` instead of editing shared code or each machine's ~/.config);
+     with a `git pull` instead of editing shared code or each machine's ~/.config). The environment variable
+     CLAUDE_SHARED_TEAM_CONFIG_DIR replaces that directory (team_dir()); the kit's own tests point it at an empty temp dir, so a
+     test run inside a downstream fork never reads the team's committed values;
   4. `default`.
 Personal keys (person, plan, root) pass team=False: a committed team value would give every member the same name or plan.
 <clone> is the repo this file sits in (tools/..). A legacy --copy install has no clone next to its copy, so it reads 1, 2 and 4 only.
@@ -26,6 +28,7 @@ from hidden_loader import hidden  # noqa: E402  (one hidden-launch helper)
 CLONE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 PERSONAL_DIR = os.path.join(os.path.expanduser("~"), ".config", "claude-shared")
 TEAM_DIR = os.path.join(CLONE, "team-config")
+TEAM_DIR_ENV = "CLAUDE_SHARED_TEAM_CONFIG_DIR"   # replaces TEAM_DIR when set and non-empty (tools/tests/fork_support.py sets it for tests)
 MIGRATE = os.path.join(CLONE, "tools", "team_migrate.py")
 MIGRATE_TIMEOUT = 120   # seconds; --ensure is meant to be idempotent and quick when there is nothing to do
 LOCK = os.path.join(os.path.expanduser("~"), ".claude", "team-migrate.lock")   # one --ensure at a time (installer vs rules_watch)
@@ -41,14 +44,19 @@ def first_line(path):
         return ""
 
 
+def team_dir():
+    """The directory of layer 3: env CLAUDE_SHARED_TEAM_CONFIG_DIR, else <clone>/team-config."""
+    return (os.environ.get(TEAM_DIR_ENV) or "").strip() or TEAM_DIR
+
+
 def value(file, env=None, default="", team=True):
-    """One config key in the order of the module doc: env `env`, ~/.config/claude-shared/<file>, <clone>/team-config/<file>
+    """One config key in the order of the module doc: env `env`, ~/.config/claude-shared/<file>, <team_dir()>/<file>
     (only with team=True), then `default`. Always a stripped string."""
     v = (os.environ.get(env) or "").strip() if env else ""
     if not v and file:
         v = first_line(os.path.join(PERSONAL_DIR, file))
         if not v and team:
-            v = first_line(os.path.join(TEAM_DIR, file))
+            v = first_line(os.path.join(team_dir(), file))
     return v or str(default).strip()
 
 

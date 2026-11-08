@@ -8,6 +8,8 @@ import sys
 import tempfile
 import unittest
 
+import fork_support
+
 TOOLS = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
 TOOL = "gh_board.py"     # stdlib only, imports hidden at the top (a missing hidden.py once raised ModuleNotFoundError: hidden)
 SIBLINGS = ("settings.py",)   # other tools/ modules the tool imports (they ship together; only hidden.py may be missing)
@@ -68,6 +70,8 @@ class HiddenLoad(unittest.TestCase):
                         for n, line in enumerate(fh, 1):
                             if line.startswith(("import hidden", "from hidden import")):
                                 bad.append("%s:%d" % (os.path.relpath(p, root), n))
+        owned = fork_support.team_owned(root, {b.rsplit(":", 1)[0] for b in bad})   # a downstream fork's own files are not scanned
+        bad = [b for b in bad if b.rsplit(":", 1)[0].replace(os.sep, "/") not in owned]
         self.assertEqual(bad, [], "use `from hidden_loader import hidden` (falls back when hidden.py is missing)")
 
 

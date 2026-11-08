@@ -34,6 +34,8 @@ os.environ["CLAUDE_SHARED_NOTIFIER"] = "0"   # no desktop notification from a te
 os.environ["CLAUDE_SHARED_EFFICIENCY"] = "0"       # no cost-report scan and no GitHub Projects call from the share tests (cost_efficiency)
 os.environ.pop("COST_PRICES", None)
 sys.path.insert(0, BIN)
+sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "..", "tools", "tests")))
+import fork_support  # noqa: E402  (scan tests skip a downstream fork's team-owned paths)
 import cost  # noqa: E402
 import cost_parse as CP  # noqa: E402
 import cost_core as CK  # noqa: E402
@@ -609,14 +611,19 @@ class PersonalDataGuard(unittest.TestCase):
     def test_no_machine_specific_strings_in_shipped_files(self):
         plug = os.path.normpath(os.path.join(HERE, ".."))
         bad = ["/home/", "example-user", "example-host", "olcum/fiyatlar"]   # a private measurement path name (kept as the string it guards against)
+        repo = os.path.normpath(os.path.join(plug, "..", ".."))
+        shipped = []
         for sub in ("bin", "systemd"):
             for root, _, files in os.walk(os.path.join(plug, sub)):
                 if "__pycache__" in root:
                     continue
-                for n in files:
-                    txt = rd(os.path.join(root, n)).lower()
-                    for b in bad:
-                        self.assertNotIn(b, txt, "%s contains %r" % (os.path.join(root, n), b))
+                shipped += [os.path.join(root, n) for n in files]
+        # a downstream fork's own files (git attribute `team-owned` in its .gitattributes) are not the kit's to police
+        rels = fork_support.drop_team_owned(repo, [os.path.relpath(p, repo) for p in shipped])
+        for rel in rels:
+            txt = rd(os.path.join(repo, rel)).lower()
+            for b in bad:
+                self.assertNotIn(b, txt, "%s contains %r" % (rel, b))
         for n in ("daily.jsonl", "hourly.jsonl", "status.cache", "cache.json"):
             self.assertFalse(os.path.exists(os.path.join(plug, "bin", n)), n)
         self.assertFalse(os.path.exists(os.path.join(plug, "panel")))

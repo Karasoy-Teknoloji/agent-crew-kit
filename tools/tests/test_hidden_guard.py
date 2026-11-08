@@ -8,7 +8,10 @@ Run: python -m unittest discover -s tools/tests
 """
 import ast
 import os
+import tempfile
 import unittest
+
+import fork_support
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 HELPERS = {os.path.join("tools", "hidden.py"), os.path.join("tools", "hidden_loader.py")}   # hidden_loader: the plain-subprocess stand-in when hidden.py is missing
@@ -23,13 +26,16 @@ def is_test_file(rel):
 
 
 def python_files():
+    """Every Python file the guard covers: not a helper, not a test, not marked `team-owned` in .gitattributes (a downstream fork's own files)."""
+    found = []
     for d, dirs, files in os.walk(ROOT):
         dirs[:] = [x for x in dirs if x not in SKIP_DIRS]
         for f in files:
             if f.endswith(".py"):
                 rel = os.path.relpath(os.path.join(d, f), ROOT)
                 if rel not in HELPERS and not is_test_file(rel):
-                    yield rel
+                    found.append(rel)
+    return fork_support.drop_team_owned(ROOT, found)
 
 
 def offenders(path):
@@ -69,9 +75,24 @@ class ProcessGuardTest(unittest.TestCase):
         bad = ["%s:%d  %s" % (p.replace("\\", "/"), ln, what) for p in python_files() for ln, what in offenders(p)]
         self.assertFalse(bad, "start children with tools/hidden.py (run/popen), never directly:\n  " + "\n  ".join(bad))
 
+    def test_team_owned_files_are_not_scanned(self):
+        global ROOT
+        with tempfile.TemporaryDirectory() as d:
+            for rel in ("tools/own.py", "tools/lab/theirs.py"):
+                os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
+                with open(os.path.join(d, rel), "w", encoding="utf-8") as f:
+                    f.write("import subprocess\nsubprocess.run(['x'])\n")
+            old, ROOT = ROOT, d
+            try:
+                self.assertEqual(sorted(p.replace("\\", "/") for p in python_files()), ["tools/lab/theirs.py", "tools/own.py"])
+                with open(os.path.join(d, ".gitattributes"), "w", encoding="utf-8") as f:
+                    f.write("tools/lab/** team-owned\n")
+                self.assertEqual([p.replace("\\", "/") for p in python_files()], ["tools/own.py"])
+            finally:
+                ROOT = old
+
     def test_guard_sees_the_bypass_forms(self):
         """The scanner itself: aliases, from-imports and function-local imports are all caught, comments and strings are not."""
-        import tempfile
         src = ("import subprocess as sp\nfrom subprocess import run as r\nimport os\n"
                "def f():\n    import subprocess\n    subprocess.Popen(['x'])\n    sp.call(['x'])\n    r(['x'])\n    os.system('x')\n"
                "# subprocess.run(['x'])\nS = 'subprocess.run(x)'\n")

@@ -20,7 +20,7 @@ class Layers(unittest.TestCase):
         os.makedirs(self.personal)
         os.makedirs(self.team)
         for p in (mock.patch.object(settings, "PERSONAL_DIR", self.personal), mock.patch.object(settings, "TEAM_DIR", self.team),
-                  mock.patch.dict(os.environ, {"KIT_TEST_KEY": ""})):
+                  mock.patch.dict(os.environ, {"KIT_TEST_KEY": "", settings.TEAM_DIR_ENV: ""})):   # "" = not set: layer 3 is TEAM_DIR (patched above)
             p.start()
             self.addCleanup(p.stop)
 

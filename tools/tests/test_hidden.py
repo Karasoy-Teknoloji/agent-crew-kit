@@ -8,6 +8,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import hidden  # noqa: E402
+import fork_support  # noqa: E402  (a downstream fork's team-owned paths are not scanned)
 
 NT = os.name == "nt"
 
@@ -52,6 +53,7 @@ class Hidden(unittest.TestCase):
                 t = p.read_text(encoding="utf-8", errors="replace")
                 if "0x08000000" in t or "New-ScheduledTaskAction" in t or "Register-ScheduledTask" in t.replace("Unregister-ScheduledTask", ""):
                     bad.append(str(p.relative_to(root)))
+        bad = fork_support.drop_team_owned(root, bad)
         self.assertEqual(sorted(set(bad)), [])
 
     def test_no_script_launches_with_a_raw_start_process_window_style_hidden(self):
@@ -67,7 +69,8 @@ class Hidden(unittest.TestCase):
                 for n, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
                     if not line.lstrip().startswith("#") and rx.search(line):
                         bad.append("%s:%d" % (p.relative_to(root).as_posix(), n))
-        self.assertEqual(bad, [])
+        owned = fork_support.team_owned(root, {b.rsplit(":", 1)[0] for b in bad})
+        self.assertEqual([b for b in bad if b.rsplit(":", 1)[0] not in owned], [])
 
 
 if __name__ == "__main__":
