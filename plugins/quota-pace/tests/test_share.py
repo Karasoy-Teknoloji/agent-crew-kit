@@ -425,7 +425,7 @@ class Commits(unittest.TestCase):
         self.addCleanup(shutil.rmtree, home, True)
         root = os.path.join(home, "src")
         os.makedirs(root)
-        with mock.patch.dict(os.environ, {}, clear=False), mock.patch.object(P, "HOME", home),                 mock.patch.object(P, "read_from_file", return_value=""):
+        with mock.patch.dict(os.environ, {}, clear=False), mock.patch.object(P, "HOME", home),                 mock.patch.object(P.settings, "first_line", return_value=""):
             os.environ.pop("CLAUDE_SHARED_ROOT", None)
             self.assertEqual(P.root_dir(), root)
 
@@ -637,7 +637,7 @@ class UpcomingWorkWhoTakes(unittest.TestCase):
         order = [{"person": "Ali X", "mode": "TIGHT", "forecast": 10}, {"person": "Cem X", "mode": None, "forecast": None},
                 {"person": "Bora X", "mode": "PLENTY", "forecast": 80}, {"person": "Deniz X", "mode": "PLENTY", "forecast": 40},
                 {"person": "Ece X", "mode": "NORMAL", "forecast": 5}]
-        m = "\n".join(P.upcoming_work_lines(order))
+        m = "\n".join(P.upcoming_work_lines(order, {r["person"]: "developer" for r in order}))
         self.assertIn("### Who picks next", m)
         names = re.findall(r"^\| \d \| (\w+) \|", m, re.M)
         self.assertEqual(names, ["Deniz", "Bora", "Ece", "Ali", "Cem"])
@@ -647,7 +647,7 @@ class UpcomingWorkWhoTakes(unittest.TestCase):
     def test_testers_and_managers_take_no_work(self):
         order = [{"person": "Ali X", "mode": "PLENTY", "forecast": 5}, {"person": "Ece X", "mode": "NORMAL", "forecast": 50},
                 {"person": "Veli X", "mode": "PLENTY", "forecast": 1}]
-        m = "\n".join(P.upcoming_work_lines(order, {"Ali X": "tester", "Veli X": "manager"}))
+        m = "\n".join(P.upcoming_work_lines(order, {"Ali X": "tester", "Veli X": "manager", "Ece X": "developer"}))
         self.assertEqual(re.findall(r"^\| \d \| (\w+) \|", m, re.M), ["Ece"])
         self.assertIn("_tester (takes no work): Ali_", m)
         self.assertIn("_manager (takes no work): Veli_", m)
@@ -655,6 +655,37 @@ class UpcomingWorkWhoTakes(unittest.TestCase):
 
     def test_ranking_in_text(self):
         self.assertNotIn("Who picks next", P.ranking_text({}, "2026-10-28"))
+
+
+class UnknownRoleFailsClosed(unittest.TestCase):
+    """Only an exact `developer` role picks board work and owns triage; any other value, or none, takes no work."""
+
+    def parse(self, data):
+        with mock.patch.object(P, "write_log") as log:
+            return P.person_parse(data), log
+
+    def test_unknown_or_missing_role_is_no_role_with_a_warning(self):
+        out, log = self.parse({"a": {"name": "Ali X", "role": "lead-dev"}, "b": {"name": "Bora X"}, "c": "Cem X",
+                               "d": {"name": "Deniz X", "role": "developer"}})
+        self.assertEqual(out, {"a": ("Ali X", None), "b": ("Bora X", None), "c": ("Cem X", "developer"), "d": ("Deniz X", "developer")})
+        self.assertEqual(log.call_count, 2)
+        self.assertIn("no known role", log.call_args_list[0][0][0])
+
+    def test_a_people_file_with_non_canonical_role_values_gives_no_developer(self):
+        old = {"l%d" % i: {"name": "Person%d X" % i, "role": r} for i, r in enumerate(["dev"] * 3 + ["qa"] * 3 + ["lead"])}
+        out, _ = self.parse(old)
+        self.assertEqual(sum(r == "developer" for _n, r in out.values()), 0)
+
+    def test_no_role_is_left_out_of_who_picks_next_and_the_work_order(self):
+        rows = {n: [dict(record("2026-10-28", quota=10, person=n), mode="PLENTY")] for n in ("Ali X", "Bora X", "Cem X")}
+        roles = {"Ali X": "developer", "Bora X": None}          # Bora: unknown role; Cem: not in people.json at all
+        order, outside = P.work_order(rows, "2026-10-28", roles)
+        self.assertEqual(order, ["Ali X"])
+        self.assertEqual(dict(outside), {"Bora X": "no known role (takes no work)", "Cem X": "no known role (takes no work)"})
+        lines = [{"person": n, "mode": "PLENTY", "forecast": 10} for n in ("Ali X", "Bora X", "Cem X")]
+        m = "\n".join(P.upcoming_work_lines(lines, roles))
+        self.assertEqual(re.findall(r"^\| \d \| (\w+) \|", m, re.M), ["Ali"])
+        self.assertIn("_no known role (takes no work): Bora, Cem_", m)
 
 
 class GithubCommitCountWithoutStdout(unittest.TestCase):
@@ -667,7 +698,7 @@ class GithubCommitCountWithoutStdout(unittest.TestCase):
     def test_no_org_configured_is_unknown_without_a_gh_call(self):
         go = mock.Mock()
         with tempfile.TemporaryDirectory() as d, mock.patch.object(P, "_cache_path", return_value=os.path.join(d, "ob.json")), \
-                mock.patch.object(P.subprocess, "run", go), mock.patch.object(P, "read_from_file", return_value=""), \
+                mock.patch.object(P.subprocess, "run", go), mock.patch.object(P.settings, "first_line", return_value=""), \
                 mock.patch.dict(os.environ, {"GH_ORG": ""}):
             self.assertIsNone(P.github_commit_count("x", "2026-11-01", now=1.0))
         go.assert_not_called()

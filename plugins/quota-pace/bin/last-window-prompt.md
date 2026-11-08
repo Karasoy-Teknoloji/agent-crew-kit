@@ -36,7 +36,7 @@ Journal file: `{{JOURNAL}}` (Markdown, append only, written by you and by the wr
 
 ## Rules that always apply
 
-Read `~/.claude/agent-common-kurallar.md` (if it exists) and the claude-shared `rules/WORKING-RULES.md` once at the start. Everything there applies. In particular:
+Read `~/.claude/agent-common-rules.md` (if it exists) and the claude-shared `rules/WORKING-RULES.md` once at the start. Everything there applies. In particular:
 - Builds and tests run on the lab/build VMs (see the rules), never on this workstation. Merge to `dev` only with tests green, then run the live end-to-end check the rules ask for.
 - Starting an issue: assign it to {{LOGIN}} (REST `POST /repos/{o}/{r}/issues/{n}/assignees`), move its card to "In Progress" (`python3 {{TOOLS}}/gh_board.py set --status "In Progress" URL`), post the "started" line. Finished: card to "👀 In review" (plus the shared test-queue board if the team keeps one), the end-user test scenario comment, commit references the issue, "done (awaiting test)" in the thread.
 - Slack: ONE status line per item in `{{CHANNEL}}` (id {{CHANNEL_ID}}) through the Slack connector (`mcp__plugin_slack_slack__*`; load them with ToolSearch if they are deferred), in the team format `<person> · <repo> · <area/path> · <issue url> · started|done|handed-over`, where `<person>` is {{PERSON}}. Exactly two moments, nothing in between:

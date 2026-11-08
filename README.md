@@ -79,17 +79,23 @@ Edit the rule files on that branch and commit. Changes on `main` reach you only 
 
 ## Configuration
 
-Every setting has a documented default, so the kit works standalone. A key is read from the environment, or (where a file name is given) from the first line of `~/.config/claude-shared/<file>`.
+Every setting has a documented default, so the kit works standalone. One reader, `tools/settings.py`, resolves every key below in this order:
+
+1. the environment variable;
+2. the first line of `~/.config/claude-shared/<file>` (your own setting);
+3. the first line of `<clone>/team-config/<file>`, where a team that runs its own fork of this kit commits its values, so every member gets them with `git pull` (never for the personal keys `person`, `plan` and `root`);
+4. the default.
 
 | Key | File | Default | Used by |
 |---|---|---|---|
 | `VAULT_ADDR`, `VAULT_TOKEN` | `~/.vault-token` | none: `vault_cli.py` exits with "VAULT_ADDR is not set" | `tools/vault_cli.py` |
-| `VAULT_FIND_EXCLUDING` | | none | `vault_cli.py find`: comma-separated `<mount>/<path>/` prefixes never listed or read (e.g. an alerting backup tier) |
+| `VAULT_FIND_EXCLUDING` | `vault-find-excluding` | none | `vault_cli.py find`: comma-separated `<mount>/<path>/` prefixes never listed or read (e.g. an alerting backup tier) |
 | `GH_ORG` | `org` | none: the GitHub org features are off | `tools/gh_board.py` (required), the ranking's 7-day commit column, the last-window issue search |
-| `GH_BOARD_TEST_QUEUE` | | `0` (none) | `gh_board.py`: number of an org-wide test-queue project |
+| `GH_BOARD_TEST_QUEUE` | `test-queue` | `0` (none) | `gh_board.py`: number of an org-wide test-queue project |
 | `CLAUDE_SHARED_REMOTE` | `remote` | none: the usage ranking and the last-window journal are off | clone URL of the team's shared usage repo |
 | `CLAUDE_SHARED_REPORT_DIR` | `report-dir` | `reports/usage` | report folder inside that repo |
 | `CLAUDE_SHARED_PEOPLE` | `people-path` | `plugins/quota-pace/people.json` | the people list inside that repo |
+| `CLAUDE_SHARED_LAST_WINDOW_DIR` | `last-window-dir` | `reports/last-window` | last-window log folder inside that repo |
 | `CLAUDE_SHARED_PERSON`, `CLAUDE_SHARED_PLAN` | `person`, `plan` | `git config user.name`; none | your name in the ranking; plan size (100 or 200) |
 | `CLAUDE_SHARED_ROOT` | `root` | `~/source/repos`, else `~/src` | folder that holds your clones (daily commit count) |
 | `LAST_WINDOW_REPOS` | `product-repos` | none | product repos for the last-window label and CI checks |
@@ -105,7 +111,11 @@ The people list of the shared usage repo (`people.json`):
 }
 ```
 
-Roles: `developer` (developer: picks board work), `tester` (tester), `manager` (management).
+Roles: `developer` (developer: picks board work), `tester` (tester), `manager` (management). The short form `"github-login": "Display Name"` is a developer. Any other role value, or an object without `role`, is "no known role" and fails closed: that person never picks board work or owns triage, the ranking lists them under "no known role (takes no work)", and the job logs a warning.
+
+### Team fork
+
+A team can run its own fork of this kit and merge kit `main` into it. It keeps its values in committed `team-config/<file>` files (keys above) instead of editing shared code. If the fork ships `tools/team_migrate.py`, the installer and the `rules_watch.py` background run call `team_migrate.py --ensure` first (before the saved install record or `quota-pace.json` is read), with a timeout. The call fails open: a failure or a timeout is reported and the install or update goes on. After a background pull that moved HEAD, the hook runs once more so a migration that arrived with the pull applies in the same cycle. The script must be idempotent (it can run many times, also right after it finished). The kit serializes runs with a lock file (`~/.claude/team-migrate.lock`, taken over after the timeout plus 30 s): a second caller skips the migration with a one-line note. The kit itself ships no such script.
 
 ### Usage ranking (optional)
 

@@ -419,8 +419,19 @@ def refresh_rules(old):
     if FETCH_CLOSED and not old.get("identity"):   # once; git config is the user's own, never changed here
         notes.append("git credential.helper on this machine is 'helper-selector' (or empty): network calls are skipped, rule updates do not arrive and "
                      "on Windows a selector window may open. Fix: git config --global credential.helper manager")
+    def migrate():   # a downstream team's own migration (tools/team_migrate.py --ensure); fails open
+        try:
+            import settings
+            notes.extend(clean(line, 400) for line in settings.team_migrate())
+        except ImportError:   # a copy without tools/settings.py: no team layer, nothing to run
+            pass
+        except Exception as e:
+            notes.append(f"team migration skipped: {type(e).__name__}")
+
+    migrate()   # before quota-pace.json is read
     mode = direct_mode()
     if mode:
+        head_before = run_git(Path(mode["repo"]), "rev-parse", "HEAD")[1]
         try:
             note, info = quota_update(mode, state)
         except Exception as e:   # never block over the auto-update
@@ -430,6 +441,8 @@ def refresh_rules(old):
         if info:
             ctx.append(info)
             doc["important"] = True   # the pull failed its self-check and was rolled back (or could not be)
+        if run_git(Path(mode["repo"]), "rev-parse", "HEAD")[1] != head_before:
+            migrate()   # a migration that arrived with the pull: this script is the pulled one, run it before quota_setting
     if mode:   # every run, after the pull: idempotent, one call, no write when nothing changed
         try:
             status, note = quota_setting(mode)

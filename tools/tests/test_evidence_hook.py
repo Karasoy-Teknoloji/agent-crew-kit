@@ -144,6 +144,17 @@ class AccessClaims(unittest.TestCase):
             self.assertEqual(r["decision"], "block", msg)
             self.assertIn("vault_cli.py find", r["reason"])
 
+    def test_token_words_match_whole_words_only(self):
+        # Regression: "pat" matched inside the Turkish word "Kapatılacak" ("to be closed") and blocked a harmless reply.
+        rows = [PROMPT, bash("ls"), RESULT]
+        msg = ("PR #1'deki inceleme bulgularını düzeltip birleştirecek ajan 14 dakikadır çalışıyor, henüz susmuş sayılmaz. "
+               "Kapatılacak bitmiş ajan yok.")
+        self.assertIsNone(self.hook(msg, rows))
+        for ok in ["Kapatılacak ajan yok.", "Patates yok.", "Bu patlak yok."]:
+            self.assertIsNone(self.hook(ok, rows), ok)
+        for bad in ["PAT yok", "token yok"]:
+            self.assertEqual(self.hook(bad, rows)["decision"], "block", bad)
+
     def test_reason_names_the_claim(self):
         r = self.hook("Bu arada yetkimiz yok.", [PROMPT])
         self.assertIn("'yetkimiz yok'", r["reason"])

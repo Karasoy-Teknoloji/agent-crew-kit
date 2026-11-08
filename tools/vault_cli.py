@@ -31,6 +31,7 @@ import subprocess
 import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # python -I drops the script dir
 from hidden_loader import hidden  # noqa: E402  (one hidden-launch helper)
+import settings  # noqa: E402  (the one config-key reader)
 import tempfile
 import threading
 import urllib.error
@@ -401,11 +402,12 @@ DESC_MAX = 240
 META_VALUE_MAX = 512  # Vault limit for one custom_metadata value (bytes)
 BUL_WORKERS = 12
 BUL_DEFAULT_LIMIT = 30
-# Never walked, listed or read by find / migrate-descriptions: config key VAULT_FIND_EXCLUDING (env), comma-separated `<mount>/<path>/` prefixes,
+# Never walked, listed or read by find / migrate-descriptions: config key VAULT_FIND_EXCLUDING / vault-find-excluding (tools/settings.py),
+# comma-separated `<mount>/<path>/` prefixes,
 # default none. Use it for a tier where every request raises an alert (e.g. an offline backup tier); use the full path with
 # fields / check / run there instead.
 def find_exclude():
-    return tuple(e.strip().strip("/") + "/" for e in os.environ.get("VAULT_FIND_EXCLUDING", "").split(",") if e.strip().strip("/"))
+    return tuple(e.strip().strip("/") + "/" for e in settings.value("vault-find-excluding", "VAULT_FIND_EXCLUDING").split(",") if e.strip().strip("/"))
 
 
 def cache_file():

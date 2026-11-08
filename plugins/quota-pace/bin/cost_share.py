@@ -39,7 +39,8 @@ q=author:<login> org:<GH_ORG> author-date:>=<today-6>, minus the automation subj
 the sum of the row figures when `gh` is missing or fails. Default branch of each repo only (GitHub search limitation).
 Never fails loudly: any error goes to <config dir>/cost/share.log and the exit code stays 0.
 
-Config keys (env, else the first line of ~/.config/claude-shared/<file>; README, "Configuration"):
+Config keys (env, else the first line of ~/.config/claude-shared/<file>, else of <clone>/team-config/<file>; tools/settings.py,
+README "Configuration"):
   CLAUDE_SHARED_REMOTE (remote)              the team's shared usage repo (clone URL). No default: unset = the ranking is off.
   CLAUDE_SHARED_REPORT_DIR (report-dir)  report folder inside that repo, default reports/usage.
   CLAUDE_SHARED_PEOPLE (people-path)      the people list inside that repo, default plugins/quota-pace/people.json.
@@ -57,6 +58,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "..", "tools"))  # repo layout: tools/hidden.py (a --copy install ships it next to this file)
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from hidden_loader import hidden  # noqa: E402  (one hidden-launch helper)
+import settings  # noqa: E402  (the one config-key reader: env, ~/.config/claude-shared, <clone>/team-config)
 import runlog  # noqa: E402  (the rolling run log)
 import time
 
@@ -70,7 +72,7 @@ PLANS = (100, 200)
 MODELS = (("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku"), ("fable", "Fable"))
 
 HOME = os.path.expanduser("~")
-SETTING = os.path.join(HOME, ".config", "claude-shared")
+SETTING = settings.PERSONAL_DIR   # ~/.config/claude-shared: the installer writes person and plan here
 
 # A scanned repo's own config must not run code: command-line -c beats .git/config (fsmonitor, hooks, ssh, pager, external
 # diff, credential helpers, ext:: transport). Same list as tools/lost_work.py (SAFE_GIT); tools/ is not installed next to this file.
@@ -86,21 +88,10 @@ _CHECK = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
 
 
 # ------------------------------------------------------------------ small helpers
-def setting_path(name):
-    return os.path.join(SETTING, name)
-
-
-def read_from_file(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return f.readline().strip()
-    except OSError:
-        return ""
-
-
-def setting_value(name, env, default=""):
-    """One config key: env `env`, else the first line of ~/.config/claude-shared/<name>, else `default` (see the module doc)."""
-    return (os.environ.get(env) or read_from_file(setting_path(name)) or default).strip()
+def setting_value(name, env, default="", team=True):
+    """One config key through tools/settings.py: env `env`, ~/.config/claude-shared/<name>, <clone>/team-config/<name> (team keys
+    only), else `default` (see the module doc)."""
+    return settings.value(name, env, default, team=team)
 
 
 REPORT_DIR = setting_value("report-dir", "CLAUDE_SHARED_REPORT_DIR", "reports/usage").strip("/")
@@ -117,7 +108,7 @@ def clean_name(s, limit=30):
 
 
 def person_name():
-    name = os.environ.get("CLAUDE_SHARED_PERSON") or read_from_file(setting_path("person"))
+    name = setting_value("person", "CLAUDE_SHARED_PERSON", team=False)
     if not name:
         name = git_output(HOME, "config", "--get", "user.name") or ""
     return clean_name(name)
@@ -276,7 +267,7 @@ def weekly_quota(now=None):
 
 
 def root_dir():
-    path = os.environ.get("CLAUDE_SHARED_ROOT") or read_from_file(setting_path("root"))
+    path = setting_value("root", "CLAUDE_SHARED_ROOT", team=False)
     candidates = [path] if path else [os.path.join(HOME, "source", "repos"), os.path.join(HOME, "src")]   # documented defaults
     for a in candidates:
         a = os.path.expanduser(a)
@@ -579,7 +570,7 @@ def model_distribution(record):
 
 def read_plan():
     """100 or 200 from env CLAUDE_SHARED_PLAN / ~/.config/claude-shared/plan; None when not set (the row then says '—')."""
-    raw = os.environ.get("CLAUDE_SHARED_PLAN") or read_from_file(setting_path("plan"))
+    raw = setting_value("plan", "CLAUDE_SHARED_PLAN", team=False)
     m = re.search(r"\d+", raw or "")
     return int(m.group()) if m and int(m.group()) in PLANS else None
 
@@ -802,17 +793,18 @@ def work_order(person_lines, today, roles=None):
     """Who takes the next piece of work (rules/WORKING-RULES.md, "Who picks next"): (order, outside).
     order = names that may take work, best first: pace mode PLENTY before NORMAL, then the lowest forecast % at the target
     ("Forecast"; the weekly % when there is no forecast), then the name. outside = [(name, reason)] of the people who never take
-    work: role tester or manager in people.json (only developers take board work), mode TIGHT, weekly use at 100 %, or no leaderboard
-    data (no row in the last 7 days, or no mode / weekly %). roles: {name: role} (default: read_roles() of this clone; a name
-    without a role is a developer). The single ranking used by the leaderboard and by the triage job's owner lease."""
+    work: any role other than developer in people.json (tester, manager, or no known role: fail closed), mode TIGHT, weekly use at
+    100 %, or no leaderboard data (no row in the last 7 days, or no mode / weekly %). roles: {name: role} (default: read_roles() of
+    this clone; a name that is missing there or has no known role takes no work). The single ranking used by the leaderboard and by
+    the triage job's owner lease."""
     roles = read_roles() if roles is None else roles
     order, outside = [], []
     seen = set()
     for r in compute_ranking(person_lines, today):
         seen.add(r["person"])
         mode = (r.get("mode") or "").upper()
-        if roles.get(r["person"]) in NO_WORK_ROLES:
-            outside.append((r["person"], NO_WORK_ROLES[roles[r["person"]]]))
+        if not is_developer(roles, r["person"]):
+            outside.append((r["person"], no_work_note(roles, r["person"])))
         elif not mode or r.get("quota") is None:
             outside.append((r["person"], "no data"))
         elif mode not in MODE_ORDER:
@@ -822,7 +814,7 @@ def work_order(person_lines, today, roles=None):
         else:
             t = r.get("forecast") if r.get("forecast") is not None else r["quota"]
             order.append((MODE_ORDER[mode], t, r["person"]))
-    outside += [(k, NO_WORK_ROLES.get(roles.get(k), "no data")) for k in sorted(person_lines) if k not in seen]
+    outside += [(k, "no data" if is_developer(roles, k) else no_work_note(roles, k)) for k in sorted(person_lines) if k not in seen]
     return [k for _, _, k in sorted(order)], outside
 
 
@@ -974,8 +966,8 @@ MODE_RANK = {"PLENTY": 0, "NORMAL": 1, "TIGHT": 2}
 def upcoming_work_lines(order, roles=None):
     """"Who picks next" section (WORKING-RULES, hand-overs return work to the board: the most unused quota picks next):
     developers ordered by pace mode (PLENTY, NORMAL, TIGHT), then by lowest forecast %; no mode or forecast = last, marked "no data".
-    Testers and managers (roles tester, manager; roles as in work_order) never take board work: they are listed under a
-    "tester (takes no work)" / "manager (takes no work)" note."""
+    Everyone who is not a developer (roles as in work_order) never takes board work: testers, managers and names without a known
+    role are listed under a "tester (takes no work)" / "manager (takes no work)" / "no known role (takes no work)" note."""
     roles = read_roles() if roles is None else roles
 
     def key(r):
@@ -984,11 +976,12 @@ def upcoming_work_lines(order, roles=None):
     L = ["", "### Who picks next", "",
          "Handed-over work returns to the board; only developers pick from the board, the one with the most unused quota first: mode first (PLENTY, NORMAL, TIGHT), then the lowest forecast %.", "",
          "| # | Person | Mode | Forecast |", "|---|---|---|---:|"]
-    for i, r in enumerate(sorted((r for r in order if roles.get(r["person"]) not in NO_WORK_ROLES), key=key), 1):
+    for i, r in enumerate(sorted((r for r in order if is_developer(roles, r["person"])), key=key), 1):
         data = r.get("mode") in MODE_RANK and r.get("forecast") is not None
         L.append("| %d | %s | %s | %s |" % (i, r["person"].split()[0], r["mode"] if data else "no data", "%d%%" % r["forecast"] if data else "—"))
     for role, not_ in NO_WORK_ROLES.items():
-        names = [r["person"].split()[0] for r in sorted(order, key=lambda r: r["person"]) if roles.get(r["person"]) == role]
+        names = [r["person"].split()[0] for r in sorted(order, key=lambda r: r["person"])
+                 if not is_developer(roles, r["person"]) and no_work_note(roles, r["person"]) == not_]
         if names:
             L += ["", "_%s: %s_" % (not_, ", ".join(names))]
     return L
@@ -1125,20 +1118,37 @@ def prepare_clone(clone, remote):
 
 
 ROLES = ("developer", "tester", "manager")   # people.json roles; only "developer" takes board work and owns triage
-NO_WORK_ROLES = {"tester": "tester (takes no work)", "manager": "manager (takes no work)"}   # roles that never take work, with their note
+# every other role, with its note; None = no known role (missing from people.json, or a role value outside ROLES): fails closed
+NO_WORK_ROLES = {"tester": "tester (takes no work)", "manager": "manager (takes no work)", None: "no known role (takes no work)"}
+
+
+def is_developer(roles, name):
+    """Whether `name` may take board work and own triage: only an exact "developer" role does (fail closed)."""
+    return roles.get(name) == "developer"
+
+
+def no_work_note(roles, name):
+    """The note of a name that takes no work: its role's note, or the no-known-role note."""
+    return NO_WORK_ROLES.get(roles.get(name) if roles.get(name) in ROLES else None)
 
 
 def person_parse(data):
     """{github login (lower case): (display name, role)} from parsed people.json, the single parser of that file. An entry is either
-    "Name" (short format = role developer) or {"name": "Name", "role": "developer"|"tester"|"manager"}; a missing or
-    unknown role is developer. Invalid entries are skipped; {} when `data` is not an object."""
+    "Name" (short format = role developer) or {"name": "Name", "role": "developer"|"tester"|"manager"}. In the object format a
+    missing or unknown role is None ("no known role": never takes board work or owns triage, fail closed) and is logged as a
+    warning. Invalid entries are skipped; {} when `data` is not an object."""
     if not isinstance(data, dict):
         return {}
     out = {}
     for l, v in data.items():
         name, role = (v, None) if isinstance(v, str) else ((v.get("name"), v.get("role")) if isinstance(v, dict) else (None, None))
         if isinstance(l, str) and isinstance(name, str) and clean_name(name):
-            out[l.lower()] = (clean_name(name), role if role in ROLES else "developer")
+            if isinstance(v, str):
+                role = "developer"
+            elif role not in ROLES:
+                write_log("warning: people.json: %s has no known role (%r; known: %s); takes no work" % (clean(l, 60), clean(str(role), 40), ", ".join(ROLES)))
+                role = None
+            out[l.lower()] = (clean_name(name), role)
     return out
 
 
