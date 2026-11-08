@@ -1,0 +1,40 @@
+name: statusline-platforms
+
+# Manual only (org rule: no push triggers). Not a required check: it proves that the quota-pace status line installs and renders
+# the same segments on Linux, macOS and Windows.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: jq (the Linux/macOS status line needs it; install.sh refuses to install without it)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          command -v jq >/dev/null 2>&1 || { if [ "$RUNNER_OS" = macOS ]; then brew install jq; else sudo apt-get install -y jq; fi; }
+          jq --version
+
+      - name: Unit tests
+        shell: bash
+        run: python -I -m unittest discover -s plugins/quota-pace/tests
+
+      - name: Install into a scratch HOME and render both lines from the masked sample
+        shell: bash
+        run: python plugins/quota-pace/tests/platform_render.py --scratch "$RUNNER_TEMP/scratch-home"

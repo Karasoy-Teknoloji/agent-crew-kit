@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code maliyeti</title>
+<!-- Static local dashboard for cost. `cost --panel` copies this file to <config dir>/cost/panel/index.html with the
+     data embedded in the <script id="data"> block below. No network, no external script, font or image: open it with file://. -->
+<style>
+:root{--bg:#fafaf7;--fg:#1d1d1b;--mut:#6b6a63;--card:#fff;--line:#deddd5;--main:#2f6fb0;--alt:#d9822b;--bar:#2f6fb0}
+@media (prefers-color-scheme:dark){:root{--bg:#171715;--fg:#ecebe4;--mut:#9c9b92;--card:#21211f;--line:#34332f;--main:#6aa6e0;--alt:#e8a35a;--bar:#6aa6e0}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1000px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:24px 0 8px}
+.not{color:var(--mut);font-size:12px;margin:0 0 14px}
+.sek{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+.sek button{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:5px 12px;cursor:pointer;font:inherit}
+.sek button[aria-pressed=true]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.kart{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kart div{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.kart b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.kart span{color:var(--mut);font-size:12px}
+svg{width:100%;height:auto;display:block;background:var(--card);border:1px solid var(--line);border-radius:8px}
+.lej{font-size:12px;color:var(--mut);margin:4px 0}.lej i{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 10px;vertical-align:baseline}
+.tw{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:5px 10px;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}
+th{color:var(--mut);font-weight:500;border-bottom:1px solid var(--line)}tbody tr{cursor:pointer}tbody tr:hover,tbody tr[aria-selected=true]{background:color-mix(in srgb,var(--bar) 12%,transparent)}
+.pay{display:inline-block;height:8px;background:var(--bar);border-radius:2px;vertical-align:middle;margin-right:6px}
+.bos{color:var(--mut);padding:14px}
+</style>
+</head>
+<body>
+<main>
+<h1>Claude Code maliyeti</h1>
+<p class="not">Rakamlar token kullanımının <b>API liste fiyatı karşılığıdır</b> (USD, danışman çağrıları dahil); abonelik faturası değildir. Veriler yalnız bu makinede hesaplandı, hiçbir yere gönderilmedi.</p>
+<div class="sek" id="sek" role="group" aria-label="Görünüm"></div>
+<div class="card" id="card"></div>
+<h2 id="bashar">Dönemler</h2>
+<div class="lej"><i style="background:var(--main)"></i>ana oturum<i style="background:var(--alt)"></i>alt ajanlar · * kısmi dönem</div>
+<svg id="grafik" viewBox="0 0 800 220" role="img" aria-label="Dönem başına cost"></svg>
+<div class="tw"><table id="table"></table></div>
+<h2 id="dagbas">Dağılım</h2>
+<div class="tw"><table id="distribution"></table></div>
+<p class="not" id="alt"></p>
+</main>
+<script type="application/json" id="data">__COST_DATA__</script>
+<script>
+"use strict";
+var D = null;
+try { D = JSON.parse(document.getElementById("data").textContent); } catch (e) { D = null; }
+var AD = {gun: "Gün", hafta: "Week", ay: "Ay", yil: "Yıl"};
+var gor = "day", secili = null;
+var $ = function (id) { return document.getElementById(id); };
+function el(tag, text, cls) { var e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
+function usd(x, nd) { return "$" + Number(x || 0).toLocaleString("tr-TR", {minimumFractionDigits: nd === undefined ? 2 : nd, maximumFractionDigits: nd === undefined ? 2 : nd}); }
+function yuzde(x) { return x == null ? "-" : "%" + Math.round(x * 100); }
+function sayi(x) { return Number(x || 0).toLocaleString("tr-TR"); }
+function temizle(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+function satir(t, hucreler, th) { var tr = el("tr"); hucreler.forEach(function (h) { var c = el(th ? "th" : "td"); if (h instanceof Node) c.appendChild(h); else c.textContent = h; tr.appendChild(c); }); t.appendChild(tr); return tr; }
+
+function ciz() {
+  if (!D || !D.periods || !D.periods.length) { $("card").appendChild(el("div", "Veri yok.", "bos")); return; }
+  var sek = $("sek"); temizle(sek);
+  Object.keys(AD).forEach(function (g) {
+    var b = el("button", AD[g]); b.type = "button"; b.setAttribute("aria-pressed", g === gor ? "true" : "false");
+    b.onclick = function () { gor = g; secili = null; ciz(); }; sek.appendChild(b);
+  });
+  var rows = D.periods.filter(function (r) { return r.view === gor; });
+  var oz = (D.summary || []).filter(function (r) { return r.view === gor; })[0];
+  var kart = $("card"); temizle(kart);
+  if (!rows.length) { kart.appendChild(el("div", "Bu görünümde veri yok.", "bos")); temizle($("grafik")); temizle($("table")); temizle($("distribution")); return; }
+  if (oz) {
+    [[usd(oz.total_usd), "toplam (" + oz.enabled_day + " etkin gün)"], [usd(oz.avg_enabled_day_usd), "etkin gün başına ort."],
+     [oz.en_busy_label ? usd(oz.en_busy_usd) : "-", "en yoğun: " + (oz.en_busy_label || "-")],
+     [yuzde(oz.hit), "önbellek isabeti"], [usd(oz.advisor_usd), "danışman çağrıları"]].forEach(function (k) {
+      var d = el("div"); d.appendChild(el("b", k[0])); d.appendChild(el("span", k[1])); kart.appendChild(d);
+    });
+  }
+  // stacked bars: main + sub-agents per period (SVG built with the DOM API, no innerHTML)
+  var g = $("grafik"); temizle(g);
+  var NS = "http://www.w3.org/2000/svg", W = 800, H = 220, pad = 28, mx = Math.max.apply(null, rows.map(function (r) { return r.usd; })) || 1;
+  var gen = (W - 2 * pad) / rows.length, bw = Math.max(2, Math.min(36, gen * 0.7));
+  function rect(x, y, w, h, renk) { var r = document.createElementNS(NS, "rect"); r.setAttribute("x", x); r.setAttribute("y", y); r.setAttribute("width", w); r.setAttribute("height", Math.max(0, h)); r.setAttribute("fill", renk); g.appendChild(r); return r; }
+  rows.forEach(function (r, i) {
+    var x = pad + i * gen + (gen - bw) / 2, ha = (H - 2 * pad) * (r.ana_usd / mx), hb = (H - 2 * pad) * (r.alt_usd / mx);
+    var t1 = rect(x, H - pad - ha, bw, ha, "var(--main)"), t2 = rect(x, H - pad - ha - hb, bw, hb, "var(--alt)");
+    [t1, t2].forEach(function (t) { var ti = document.createElementNS(NS, "title"); ti.textContent = r.label + ": " + usd(r.usd); t.appendChild(ti); });
+    if (rows.length <= 16 || i % Math.ceil(rows.length / 16) === 0) {
+      var tx = document.createElementNS(NS, "text"); tx.setAttribute("x", x + bw / 2); tx.setAttribute("y", H - 10); tx.setAttribute("text-anchor", "middle");
+      tx.setAttribute("font-size", "10"); tx.setAttribute("fill", "var(--mut)"); tx.textContent = r.short + (r.partial ? "*" : ""); g.appendChild(tx);
+    }
+  });
+  var tm = document.createElementNS(NS, "text"); tm.setAttribute("x", 4); tm.setAttribute("y", 14); tm.setAttribute("font-size", "10"); tm.setAttribute("fill", "var(--mut)"); tm.textContent = usd(mx, mx < 10 ? 2 : 0); g.appendChild(tm);
+  // table
+  var t = $("table"); temizle(t);
+  var th = el("thead"); t.appendChild(th); var trh = el("tr"); th.appendChild(trh);
+  ["Dönem", "$", "main", "alt", "$/gün", "request", "önb."].forEach(function (h) { trh.appendChild(el("th", h)); });
+  var tb = el("tbody"); t.appendChild(tb);
+  rows.slice().reverse().forEach(function (r) {
+    var tr = satir(tb, [r.label + (r.partial ? "*" : ""), usd(r.usd), usd(r.ana_usd), usd(r.alt_usd), usd(r.usd_gun), sayi(r.request), yuzde(r.hit)]);
+    tr.setAttribute("aria-selected", secili === r.key ? "true" : "false");
+    tr.onclick = function () { secili = r.key; ciz(); };
+  });
+  // breakdown of the selected period (default: the latest)
+  var sec = secili || rows[rows.length - 1].key, lineSelect = rows.filter(function (r) { return r.key === sec; })[0] || rows[rows.length - 1];
+  $("dagbas").textContent = "Dağılım: " + lineSelect.label;
+  var dt = $("distribution"); temizle(dt);
+  var kir = (D.breakdowns || []).filter(function (k) { return k.view === gor && k.key === lineSelect.key; });
+  [["model", "Model"], ["turn", "Ajan türü"], ["project", "Proje klasörü"], ["session", "En pahalı oturumlar"]].forEach(function (b) {
+    var l = kir.filter(function (k) { return k.size === b[0]; }).sort(function (a, c) { return c.usd - a.usd; });
+    if (!l.length) return;
+    var hr = satir(dt, [b[1], "$", "pay"], true);
+    l.forEach(function (k) {
+      var kap = el("span"); var cubuk = el("span", "", "pay"); cubuk.style.width = Math.max(1, Math.round(k.pay * 100)) + "px"; kap.appendChild(cubuk); kap.appendChild(document.createTextNode(yuzde(k.pay)));
+      satir(dt, [k.name, usd(k.usd), kap]);
+    });
+  });
+  $("alt").textContent = D.summary && D.summary[0] ? "Oluşturma: " + D.summary[0].creation + " · veri: " + D.summary[0].first_day + " … " + D.summary[0].son_gun : "";
+}
+ciz();
+</script>
+</body>
+</html>

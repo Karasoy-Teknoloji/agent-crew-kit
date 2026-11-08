@@ -1,0 +1,11 @@
+# Installed by quota-pace install.sh (rendered from systemd/lost-work.service.in); runs tools/lost_work.py from the claude-shared clone.
+# Pushes own unpushed branches (never main/master/test/dev, never force, never someone else's commits); exit 1 = work still at risk.
+[Unit]
+Description=Lost-work check: push own unpushed git branches and remove lossless worktrees and local branches (lost_work.py --push-unpushed --clean-lossless)
+
+[Service]
+Type=oneshot
+ExecStart=@EXEC@
+SuccessExitStatus=0 1
+@ENV@Nice=19
+IOSchedulingClass=idle
