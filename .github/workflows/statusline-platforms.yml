@@ -96,6 +96,20 @@ jobs:
           command -v jq >/dev/null 2>&1 || { echo "::error::jq is not on this $RUNNER_OS runner image"; exit 1; }
           jq --version
 
+      # The installer's tool check and gh shim need a real gh (hosted images carry one; the kapi pool image does not, and has no sudo): pinned release asset.
+      - name: gh (Linux self-hosted)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          command -v gh >/dev/null 2>&1 || {
+            d="$RUNNER_TEMP/gh-cli"; mkdir -p "$d"
+            curl -fsSL -o "$d/gh.tgz" https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz
+            echo "4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d  $d/gh.tgz" | sha256sum -c -
+            tar -xzf "$d/gh.tgz" -C "$d" --strip-components=1
+            echo "$d/bin" >> "$GITHUB_PATH"
+          }
+          "$(command -v gh || echo "$RUNNER_TEMP/gh-cli/bin/gh")" --version
+
       - name: Unit tests
         shell: bash
         run: python -I -m unittest discover -s plugins/quota-pace/tests
