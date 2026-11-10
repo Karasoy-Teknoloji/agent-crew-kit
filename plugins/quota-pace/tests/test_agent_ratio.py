@@ -342,7 +342,7 @@ class StatusLineAction(unittest.TestCase):
     def run_line(self, pid, total, sid="sess-1"):
         d = {"session_id": sid, "prompt_id": pid, "model": {"id": "claude-opus-5-5", "display_name": "Opus 5.5"},
              "workspace": {"current_dir": self.home}, "cost": {"total_cost_usd": total}}
-        env = dict(os.environ, HOME=self.home)
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
         env.pop("CLAUDE_CONFIG_DIR", None)
         p = subprocess.run(["bash", os.path.join(PLUG, "statusline.sh")], input=json.dumps(d), capture_output=True, text=True, env=env, timeout=60)
         return p.stdout
@@ -383,7 +383,7 @@ class StatusLineAction(unittest.TestCase):
 
         def status():
             r = subprocess.run([sys.executable, "-I", os.path.join(self.home, ".claude", "bin", "cost.py"), "--status"], capture_output=True,
-                               env={k: v for k, v in dict(os.environ, HOME=self.home).items() if k != "CLAUDE_CONFIG_DIR"}, timeout=60)
+                               env={k: v for k, v in dict(os.environ, HOME=self.home, USERPROFILE=self.home).items() if k != "CLAUDE_CONFIG_DIR"}, timeout=60)
             return r.stdout.decode("utf-8")
         self.assertEqual(status(), "last 24h ₺5.000 · 7d ₺5.000 $100 · 30d ₺5.000 · API equivalent (not a bill)")      # no calibration (no ×N): no parentheses, the amounts are labelled API equivalents
         with open(ratio, "w") as f:
@@ -397,7 +397,7 @@ class StatusLineAction(unittest.TestCase):
 @unittest.skipUnless(os.name == "posix", "posix paths")
 class SubagentRow(unittest.TestCase):
     def rows(self, tasks, transcript):
-        env = dict(os.environ, HOME=_HOME, CLAUDE_CONFIG_DIR=_CFG)
+        env = dict(os.environ, HOME=_HOME, USERPROFILE=_HOME, CLAUDE_CONFIG_DIR=_CFG)
         p = subprocess.run([sys.executable, "-I", SUBAGENT_SCRIPT], input=json.dumps({"transcript_path": transcript, "tasks": tasks}),
                            capture_output=True, text=True, env=env, timeout=60)
         return {json.loads(l)["id"]: json.loads(l)["content"] for l in p.stdout.splitlines()}
@@ -426,7 +426,7 @@ class SubagentRow(unittest.TestCase):
         # Windows pipes use cp1252/cp1254: "·" and "₺" must still arrive as valid UTF-8 JSON (the row used to vanish silently)
         # Turkish locale data: a Turkish task description with Turkish letters.
         task = {"id": "zz", "agentType": "x", "description": "Türkçe açıklama", "tokenCount": 5}
-        env = dict(os.environ, HOME=_HOME, CLAUDE_CONFIG_DIR=_CFG, PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
+        env = dict(os.environ, HOME=_HOME, USERPROFILE=_HOME, CLAUDE_CONFIG_DIR=_CFG, PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
         p = subprocess.run([sys.executable, "-I", SUBAGENT_SCRIPT], input=json.dumps({"tasks": [task]}, ensure_ascii=False).encode("utf-8"),
                            capture_output=True, env=env, timeout=60)
         row = json.loads(p.stdout.decode("ascii").splitlines()[0])["content"]

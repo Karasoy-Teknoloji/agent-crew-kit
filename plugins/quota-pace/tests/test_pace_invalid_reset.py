@@ -26,11 +26,11 @@ class InvalidReset(unittest.TestCase):
         shutil.rmtree(self.home, ignore_errors=True)
 
     def status(self, data):
-        env = dict(os.environ, HOME=self.home)
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
         return subprocess.run(["bash", os.path.join(PLUG, "statusline.sh")], input=data, text=True, env=env, capture_output=True, timeout=60).stdout
 
     def hook(self):
-        env = dict(os.environ, HOME=self.home)
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
         return subprocess.run(["python3", "-I", os.path.join(PLUG, "bin", "pace-hook.py")], input='{"session_id":"t","hook_event_name":"SessionStart"}',
                               text=True, env=env, capture_output=True, timeout=60).stdout
 

@@ -140,7 +140,8 @@ class Wrapping(unittest.TestCase):
         payload = json.dumps({"model": {"id": "claude-x", "display_name": "X"}, "workspace": {"current_dir": home.replace("\\", "/")},
                               "prompt_cache": {"hit_ratio": 0.93, "misses": 2}, "cost": {"total_cost_usd": 1.2345}})
         env = {k: v for k, v in os.environ.items() if k not in DROP}
-        env.update(HOME=home, USERPROFILE=home, COLUMNS="300")
+        # discover also imports test_cost & co., which set CLAUDE_CONFIG_DIR process-wide: without this the cost script reads their fx.json, not this one
+        env.update(HOME=home, USERPROFILE=home, CLAUDE_CONFIG_DIR=os.path.join(home, ".claude"), COLUMNS="300")
 
         def run(cmd):
             return subprocess.run(cmd, input=payload, capture_output=True, text=True, encoding="utf-8", env=env, timeout=120).stdout.strip("\r\n")
@@ -149,10 +150,11 @@ class Wrapping(unittest.TestCase):
         raw = run([PWSH, "-NoProfile", "-File", sl])
         self.assertTrue(raw)
         same = run(wrap)
-        if same != raw:                                                  # the clock segment may have turned a minute between the runs
+        clock = lambda t: re.sub(r"\b\d\d:\d\d\b", "HH:MM", t, count=1)   # the one clock segment may turn a minute between two slow PowerShell starts
+        if clock(same) != clock(raw):                                    # the first run also starts the cost cache: compare again when warm
             raw = run([PWSH, "-NoProfile", "-File", sl])
             same = run(wrap)
-        self.assertEqual(same, raw)                                      # fits: byte-identical, one line
+        self.assertEqual(clock(same), clock(raw))                        # fits: byte-identical, one line (clock masked)
         env["COLUMNS"] = "22"
         narrow = run(wrap).splitlines()
         raw = run([PWSH, "-NoProfile", "-File", sl])

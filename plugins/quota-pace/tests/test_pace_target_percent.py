@@ -219,7 +219,7 @@ class Status(unittest.TestCase):
             json.dump(fc, f)
         data = json.dumps({"model": {"display_name": "X", "id": "x"}, "workspace": {"current_dir": "/"}, "rate_limits": {
             "five_hour": {"used_percentage": 10, "resets_at": now + 3600}, "seven_day": {"used_percentage": 50, "resets_at": reset}}})
-        subprocess.run(["bash", os.path.join(PLUG, "statusline.sh")], input=data, text=True, env=dict(os.environ, HOME=self.home),
+        subprocess.run(["bash", os.path.join(PLUG, "statusline.sh")], input=data, text=True, env=dict(os.environ, HOME=self.home, USERPROFILE=self.home),
                        capture_output=True, timeout=60)
         with open(os.path.join(self.home, ".claude", "pace.json"), encoding="utf-8") as f:
             p = json.load(f)

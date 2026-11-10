@@ -652,7 +652,7 @@ def load_index(refresh=False):
     """(index dict, note). Uses the cache when fresh (same VAULT_ADDR and index format, < 24 h); on a failed refresh falls back
     to a stale cache of the current format. A cache of an older format (built from value reads) is never used and is overwritten.
     Only one process builds at a time (BuildLock): the others wait, then use the cache the builder wrote (for --refresh: a cache
-    built after they started); after LOCK_TIMEOUT s a waiter builds on its own."""
+    built strictly after they started: Windows time.time() ticks about every 15 ms, so a cache from the same tick is rebuilt); after LOCK_TIMEOUT s a waiter builds on its own."""
     import time
     started = time.time()
     path, addr = cache_file(), vault_addr()
@@ -665,7 +665,7 @@ def load_index(refresh=False):
             if again:
                 cached = again
                 built = float(again.get("built") or 0)
-                if (built >= started) if refresh else (time.time() - built < CACHE_TTL):
+                if (built > started) if refresh else (time.time() - built < CACHE_TTL):
                     return again, ""
         return _build_and_save(cached, addr)
 

@@ -98,7 +98,7 @@ class Cfg:
         return path
 
     def run(self, *args, env=None, flags=("-I",)):
-        e = dict(os.environ, CLAUDE_CONFIG_DIR=self.dir, HOME=_HOME, COST_TZ="UTC", LC_ALL="C.UTF-8")
+        e = dict(os.environ, CLAUDE_CONFIG_DIR=self.dir, HOME=_HOME, USERPROFILE=_HOME, COST_TZ="UTC", LC_ALL="C.UTF-8")
         e.pop("COST_PRICES", None)
         e.update(env or {})
         r = subprocess.run([sys.executable, *flags, COST, *args], capture_output=True, text=True, encoding="utf-8", env=e, timeout=120)

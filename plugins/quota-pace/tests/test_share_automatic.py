@@ -241,7 +241,7 @@ class ShellGate(unittest.TestCase):
             "seven_day": {"used_percentage": 50, "resets_at": now + 3 * 86400}}})
         t0 = time.time()
         r = subprocess.run(["bash", os.path.join(self.plug, "statusline.sh")], input=data, text=True, capture_output=True, timeout=60,
-                           env=dict(os.environ, HOME=self.home, QUOTA_SHARE_AUTO="1"))
+                           env=dict(os.environ, HOME=self.home, USERPROFILE=self.home, QUOTA_SHARE_AUTO="1"))
         self.assertIn("50", r.stdout)                                                 # the weekly figure: the status line rendered
         time.sleep(0.6)                                                               # the detached stub is quick
         return time.time() - t0

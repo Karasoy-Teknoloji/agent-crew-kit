@@ -576,7 +576,7 @@ class Working(unittest.TestCase):
         path = self.session("Alpha")
         self.pace(3 * H)
         env = {k: v for k, v in os.environ.items() if k not in ("PACE_TARGET_HOURS", "XDG_CONFIG_HOME")}
-        env.update(HOME=self.home, CLAUDE_CONFIG_DIR=self.claude, LAST_WINDOW_CLAUDE=self.fake, LAST_WINDOW_TMUX=self.tmux, LAST_WINDOW_CHOICE=self.choice,
+        env.update(HOME=self.home, USERPROFILE=self.home, CLAUDE_CONFIG_DIR=self.claude, LAST_WINDOW_CLAUDE=self.fake, LAST_WINDOW_TMUX=self.tmux, LAST_WINDOW_CHOICE=self.choice,
                    LAST_WINDOW_POLL="0.2", LAST_WINDOW_ACK_SEC="5", FAKE_MARK=self.mark, FAKE_TRANSCRIPT=path, FAKE_TMUX_STATE=self.tstate,
                    CLAUDE_SHARED_REMOTE=self.remote, CLAUDE_SHARED_LAST_WINDOW_CLONE=self.clone, CLAUDE_SHARED_PERSON="Emre",
                    GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
@@ -662,7 +662,7 @@ class Working(unittest.TestCase):
         self.pace(8 * H)
         code = ("import runpy, sys; sys.stdout = None; sys.stderr = None; sys.argv = ['last-window', 'trigger']; "
                "runpy.run_path(%r, run_name='__main__')" % SP)
-        env = dict(os.environ, HOME=self.home, CLAUDE_CONFIG_DIR=self.claude, PACE_TARGET_HOURS="5")
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home, CLAUDE_CONFIG_DIR=self.claude, PACE_TARGET_HOURS="5")
         env.pop("LAST_WINDOW_DIR", None)
         r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, env=env, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
