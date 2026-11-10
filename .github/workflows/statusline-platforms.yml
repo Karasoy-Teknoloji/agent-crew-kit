@@ -2,8 +2,16 @@ name: statusline-platforms
 
 # Manual only (org rule: no push triggers). Not a required check: it proves that the quota-pace status line installs and renders
 # the same segments on Linux, macOS and Windows.
+# Runners: GitHub-hosted runners and paid GitHub features are never used (Karasoy-Teknoloji decision 2026-11-10). Linux runs on the org's
+# ci-kapi-linux pool, Windows on the org's ci-win-2 runner; macOS only on a self-hosted macOS runner (none is registered by default, so the
+# macOS job starts only with macos=true and then waits for one). Fork pull requests need a maintainer's approval before any workflow runs.
 on:
   workflow_dispatch:
+    inputs:
+      macos:
+        description: "Also run the macOS job on a self-hosted macOS runner (queues until one is online; none registered by default)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -11,24 +19,78 @@ permissions:
 jobs:
   render:
     name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'windows' && fromJSON('["self-hosted","Windows","ci-win-2"]') || matrix.os == 'macos' && fromJSON('["self-hosted","macOS"]') || fromJSON('["ci-kapi-linux"]') }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(inputs.macos && '["linux","macos","windows"]' || '["linux","windows"]') }}
     steps:
+      # ci-win-2 (service account, Git only under ...\Git\cmd) has no bash on PATH; the steps below use `shell: bash`.
+      - name: Git for Windows bash on PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $b = 'C:\Program Files\Git\bin'
+          if (-not (Test-Path "$b\bash.exe")) { throw "bash.exe not found under $b (Git for Windows missing on this runner)" }
+          Add-Content -Path $env:GITHUB_PATH -Value $b
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
+        if: runner.os != 'Windows'
         with:
           python-version: "3.12"
+
+      # ci-win-2 runs as a service account without admin: setup-python's Windows installer needs HKLM (Remove-Item registry error), so the
+      # same CPython 3.12 comes from the nuget.org `python` package (a plain zip: download + extract, no installer, no registry) and goes on PATH for this job.
+      - name: Python 3.12 from NuGet (Windows self-hosted)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $out = Join-Path $env:RUNNER_TEMP 'py'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          foreach ($v in '3.12.10','3.12.9','3.12.8','3.12.7') {
+            $pkg = Join-Path $out "python.$v.zip"
+            try { Invoke-WebRequest -UseBasicParsing "https://api.nuget.org/v3-flatcontainer/python/$v/python.$v.nupkg" -OutFile $pkg } catch { Write-Host "python $v : $($_.Exception.Message)"; continue }
+            Expand-Archive -LiteralPath $pkg -DestinationPath (Join-Path $out "python.$v") -Force
+            $exe = Join-Path $out "python.$v/tools/python.exe"
+            if (Test-Path $exe) { break }
+          }
+          if (-not (Test-Path $exe)) { throw 'python nuget package could not be downloaded' }
+          # GitHub-hosted Windows images put python3 on PATH; the installer's tool check and statusline.ps1 call `python3`, so the zip's python.exe gets that name too.
+          Copy-Item -LiteralPath $exe -Destination (Join-Path (Split-Path $exe) 'python3.exe') -Force
+          Add-Content -Path $env:GITHUB_PATH -Value (Split-Path $exe)
+          & $exe --version
+
+      # The same hosted images carry gh and jq, which the installer's tool check treats as required (the tests must not depend on the host having them).
+      # Pinned release assets (sha256 from the release metadata), plain downloads: no installer, no admin.
+      - name: gh and jq (Windows self-hosted)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $d = Join-Path $env:RUNNER_TEMP 'tools'
+          New-Item -ItemType Directory -Force -Path $d | Out-Null
+          function Get-Pinned($url, $sha, $out) {
+            Invoke-WebRequest -UseBasicParsing $url -OutFile $out
+            if ((Get-FileHash -Algorithm SHA256 $out).Hash.ToLower() -ne $sha) { throw "sha256 mismatch: $url" }
+          }
+          Get-Pinned 'https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe' 'a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627' (Join-Path $d 'jq.exe')
+          $zip = Join-Path $d 'gh.zip'
+          Get-Pinned 'https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_windows_amd64.zip' '98d0cfa794721665d7973dd728c78aff7bd836d58f10f6d7a03568eccb0a22e0' $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $d 'gh') -Force
+          Copy-Item -LiteralPath (Join-Path $d 'gh/bin/gh.exe') -Destination (Join-Path $d 'gh.exe') -Force
+          Add-Content -Path $env:GITHUB_PATH -Value $d
+          & (Join-Path $d 'jq.exe') --version
+          & (Join-Path $d 'gh.exe') --version
 
       - name: jq (the Linux/macOS status line needs it; install.sh refuses to install without it)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          command -v jq >/dev/null 2>&1 || { if [ "$RUNNER_OS" = macOS ]; then brew install jq; else sudo apt-get install -y jq; fi; }
+          command -v jq >/dev/null 2>&1 || { if [ "$RUNNER_OS" = macOS ]; then brew install jq; else echo 'jq missing on this runner'; exit 1; fi; }
           jq --version
 
       - name: Unit tests
