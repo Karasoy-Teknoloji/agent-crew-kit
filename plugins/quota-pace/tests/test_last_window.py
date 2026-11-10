@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(PLUG, "bin"))
 import last_window as S  # noqa: E402
 
 REAL_TAB = S.TabSession      # the real Windows tab class (the scene replaces it with a fake by default)
+SESSION_CLASS = "TabSession" if os.name == "nt" else "TmuxSession"   # the class main() picks for its own session
 
 H = 3600
 NOW = 1_800_000_000
@@ -1016,7 +1017,7 @@ class Stage(StageBase):
 
     # --- finding 2: our own session never outlives the wrapper
     def test_an_exception_after_the_start_stops_our_own_session_and_records_the_run(self):
-        S.TmuxSession.error = RuntimeError("boom")
+        getattr(S, SESSION_CLASS).error = RuntimeError("boom")
         k = self.run_cmd()
         self.assertEqual(len(self.launched), 1)
         self.assertEqual(self.launched[0].stopped, 1)
@@ -1024,7 +1025,7 @@ class Stage(StageBase):
         self.assertIn("RuntimeError: boom", self.log())
 
     def test_a_signal_after_the_start_stops_our_own_session(self):
-        S.TmuxSession.error = S.Stopped()
+        getattr(S, SESSION_CLASS).error = S.Stopped()
         k = self.run_cmd()
         self.assertEqual(self.launched[0].stopped, 1)
         self.assertEqual(k["reason"], "stopped")
@@ -1073,7 +1074,7 @@ class StageTab(StageBase):
         from unittest import mock
         self.killed, self.opened = [], []
         self.tab_pid = self.helper_pid()
-        for name, v in (("TmuxSession", REAL_TAB), ("_taskkill", self.killed.append), ("_sid_processes", lambda sid: [4242])):
+        for name, v in ((SESSION_CLASS, REAL_TAB), ("_taskkill", self.killed.append), ("_sid_processes", lambda sid: [4242])):
             p = mock.patch.object(S, name, v)
             p.start()
             self.addCleanup(p.stop)
@@ -1131,6 +1132,11 @@ class Forward(unittest.TestCase):
         with open(self.fake, "w") as f:
             f.write("#!%s\n%s" % (sys.executable, FAKE_ROLE))
         os.chmod(self.fake, 0o755)
+        if os.name == "nt":                                    # Windows runs no shebang: a .cmd shim starts the fake with this interpreter
+            shim = os.path.join(self.root, "fake_claude.cmd")
+            with open(shim, "w") as f:
+                f.write('@"%s" "%s" %%*' % (sys.executable, self.fake) + chr(10))
+            self.fake = shim
         from unittest import mock
         for name, v in (("DIR", self.root), ("HOME", self.root)):
             p = mock.patch.object(S, name, v)

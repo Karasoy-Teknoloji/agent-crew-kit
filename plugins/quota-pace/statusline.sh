@@ -3,7 +3,8 @@
 d=$(cat)
 # Sibling scripts sit in bin/ next to this file: ~/.claude/bin for the copied install, plugins/quota-pace/bin when run from the
 # claude-shared clone (install.sh --direct). Runtime data (pace.json, history, cost/) always stays under ~/.claude.
-case "${BASH_SOURCE[0]}" in */*) kt="${BASH_SOURCE[0]%/*}" ;; *) kt=. ;; esac
+src="${BASH_SOURCE[0]//\\//}"   # a Windows-style path (backslashes) from a native caller still has a directory part
+case "$src" in */*) kt="${src%/*}" ;; *) kt=. ;; esac
 # Live-session guard (same rule as statusline.ps1): only a payload from a live Claude Code session may write the live state. ~/.claude/sessions/<pid>.json
 # lists the live sessions; a payload whose session_id is not in it (test fixture, benchmark against the real profile) is rendered but writes nothing.
 # No registry, or none with a sessionId = cannot judge = write as before. Incident 05.11.2026: a fixture run made the pace hook say "TIGHT, 63%" at a real 54%.

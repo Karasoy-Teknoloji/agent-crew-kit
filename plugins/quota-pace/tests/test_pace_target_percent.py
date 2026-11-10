@@ -2,6 +2,7 @@
 Friday 09:00 with a 90% goal = target_hours 60 + target_percent 90 in ~/.claude/pace-plan.json (reset Sunday 21:00).
 Run: python3 -I -m unittest discover -s plugins/quota-pace/tests -p 'test_pace_target_percent.py'"""
 import json, os, shutil, subprocess, sys, tempfile, time, unittest
+from bash_bul import BASH  # Git Bash on Windows, never the WSL launcher in System32
 from unittest import mock
 
 PLUG = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -209,7 +210,7 @@ class Status(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
         os.makedirs(os.path.join(self.home, ".claude"))
 
-    @unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "bash and jq required")
+    @unittest.skipUnless(BASH and shutil.which("jq"), "bash and jq required")
     def test_statusline_passes_target_percent_into_pace_json(self):
         now = int(time.time())
         reset = now + 3 * 86400
@@ -219,7 +220,7 @@ class Status(unittest.TestCase):
             json.dump(fc, f)
         data = json.dumps({"model": {"display_name": "X", "id": "x"}, "workspace": {"current_dir": "/"}, "rate_limits": {
             "five_hour": {"used_percentage": 10, "resets_at": now + 3600}, "seven_day": {"used_percentage": 50, "resets_at": reset}}})
-        subprocess.run(["bash", os.path.join(PLUG, "statusline.sh")], input=data, text=True, env=dict(os.environ, HOME=self.home, USERPROFILE=self.home),
+        subprocess.run([BASH, os.path.join(PLUG, "statusline.sh")], input=data, text=True, env=dict(os.environ, HOME=self.home, USERPROFILE=self.home),
                        capture_output=True, timeout=60)
         with open(os.path.join(self.home, ".claude", "pace.json"), encoding="utf-8") as f:
             p = json.load(f)

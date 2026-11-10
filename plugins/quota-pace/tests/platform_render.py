@@ -97,7 +97,8 @@ def main():
     with open(agent, "w", encoding="utf-8") as f:
         f.write(assistant_line("ag", 1_000_000, now - 1800))             # $4.00 for the agent row
     py = sys.executable
-    rc, out, err = run([py, "-I", os.path.join(claude, "bin", "cost.py"), "--save"], env)
+    # the default install runs from the clone (no copy under ~/.claude/bin)
+    rc, out, err = run([py, "-I", os.path.join(PLUG, "bin", "cost.py"), "--save"], env)
     check(rc == 0, "cost --save on the fixture transcripts (rc %d)" % rc)
     with open(os.path.join(cost_dir, "fx.json"), "w", encoding="utf-8") as f:
         json.dump({"rate": 50.0, "t": now}, f)
@@ -155,7 +156,7 @@ def main():
     check(rc == 0 and len(rows) == 1 and rows[0].get("id") == "fx1", "one row for the fixture task")
     check(row.startswith("Fixture task: check the backup chain · senior-developer-oh · 68k"), "task, agent type and tokens")
     check(re.search(r"· ₺200 \(₺10,00\) · ", row) is not None or re.search(r"· ₺[\d.,]+ \(₺[\d.,]+\) · ", row) is not None, "agent cost in lira with the real cost in parentheses")
-    check(re.search(r"· \d+(s|m)( \d+s)?$", row) is not None, "elapsed time")
+    check(re.search(r"· \d+(s|m)( \d+s)?( · \d+(s|m)( \d+s)? quiet)?$", row) is not None, "elapsed time (then the quiet time, when the agent has been silent)")
 
     for name in ("statusline-input.json", "subagent-statusline-input.json"):
         check(os.path.isfile(os.path.join(claude, name)), "stdin dump %s written" % name)

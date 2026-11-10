@@ -503,8 +503,13 @@ class SharedFiles(unittest.TestCase):
         self._env.start()
         self._genv = mock.patch.object(P, "GIT_ENV", dict(self.env, GIT_TERMINAL_PROMPT="0"))
         self._genv.start()
+        # the ranking prints the latest row's time to the minute (now while uncommitted, the commit time afterwards): two runs a few seconds apart
+        # (slow git on Windows) can straddle a minute and the second one would regenerate a different RANKING.md. The git flow does not depend on it.
+        self._lt = mock.patch.object(P, "last_times", lambda clone, names, now=None: {})
+        self._lt.start()
 
     def tearDown(self):
+        self._lt.stop()
         self._genv.stop()
         self._env.stop()
 

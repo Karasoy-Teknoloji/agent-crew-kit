@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from bash_bul import BASH  # Git Bash on Windows, never the WSL launcher in System32
 import unittest
 from unittest import mock
 
@@ -213,7 +214,7 @@ if "--automatic" in sys.argv:
 """
 
 
-@unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "bash and jq required")
+@unittest.skipUnless(BASH and shutil.which("jq"), "bash and jq required")
 class ShellGate(unittest.TestCase):
     """statusline.sh starts the share detached only when due; renders inside the interval start nothing."""
 
@@ -240,7 +241,7 @@ class ShellGate(unittest.TestCase):
             "five_hour": {"used_percentage": 10, "resets_at": now + 3 * 3600},
             "seven_day": {"used_percentage": 50, "resets_at": now + 3 * 86400}}})
         t0 = time.time()
-        r = subprocess.run(["bash", os.path.join(self.plug, "statusline.sh")], input=data, text=True, capture_output=True, timeout=60,
+        r = subprocess.run([BASH, os.path.join(self.plug, "statusline.sh")], input=data, text=True, capture_output=True, timeout=60,
                            env=dict(os.environ, HOME=self.home, USERPROFILE=self.home, QUOTA_SHARE_AUTO="1"))
         self.assertIn("50", r.stdout)                                                 # the weekly figure: the status line rendered
         time.sleep(0.6)                                                               # the detached stub is quick

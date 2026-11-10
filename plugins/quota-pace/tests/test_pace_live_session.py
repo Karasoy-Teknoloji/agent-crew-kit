@@ -5,10 +5,11 @@ against the real profile; pace.json, pace-history.csv and statusline-input.json 
 session_id is not in it is still rendered, but nothing is written. No registry (or none with a sessionId) = no way to judge = write as before.
 Run: python3 -I -m unittest discover -s plugins/quota-pace/tests"""
 import json, os, shutil, subprocess, tempfile, time, unittest
+from bash_bul import BASH  # Git Bash on Windows, never the WSL launcher in System32
 
 PLUG = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 PWSH = shutil.which("pwsh")
-BASH_JQ = shutil.which("bash") and shutil.which("jq")
+BASH_JQ = BASH and shutil.which("jq")
 
 
 def payload(sid, now=None):
@@ -83,7 +84,7 @@ class Ps1(Base, unittest.TestCase):
 @unittest.skipUnless(BASH_JQ, "bash and jq required")
 class Sh(Base, unittest.TestCase):
     def run_status(self, data):
-        return subprocess.run(["bash", os.path.join(PLUG, "statusline.sh")], input=data, text=True, encoding="utf-8",
+        return subprocess.run([BASH, os.path.join(PLUG, "statusline.sh")], input=data, text=True, encoding="utf-8",
                               env=self.env(), capture_output=True, timeout=90).stdout
 
 
