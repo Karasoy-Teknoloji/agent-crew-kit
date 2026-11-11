@@ -6,6 +6,7 @@ The installer must never touch the real ~/.claude or the real systemd user manag
 a fake `systemctl` first on PATH records any call (there must be none), and XDG_CONFIG_HOME / CLAUDE_CONFIG_DIR are unset.
 """
 import json
+from bash_bul import BASH  # Git Bash on Windows, never the WSL launcher in System32
 import os
 import shutil
 import stat
@@ -114,7 +115,7 @@ class Installer(unittest.TestCase):
             self.assertTrue(self.installed(f), f)
         wrapper = os.path.join(self.home, ".local", "bin", "cost")
         self.assertTrue(os.stat(wrapper).st_mode & stat.S_IXUSR)
-        h = subprocess.run([wrapper, "--help"], capture_output=True, text=True, env=clean_env(HOME=self.home), timeout=60)
+        h = subprocess.run([wrapper, "--help"], capture_output=True, text=True, env=clean_env(HOME=self.home, USERPROFILE=self.home), timeout=60)
         self.assertEqual(h.returncode, 0, h.stderr)
         self.assertIn("--window", h.stdout)
         self.assertIn("[OK] cost --save", r.stdout)                 # first scan ran, against the scratch HOME only
@@ -244,18 +245,19 @@ class Installer(unittest.TestCase):
         self.assertEqual(self.install("--cost").returncode, 0)
         udir = os.path.join(self.home, ".config", "systemd", "user")
         r = subprocess.run(["systemd-analyze", "--user", "verify", os.path.join(udir, "cost-daily.service"), os.path.join(udir, "cost-daily.timer")],
-                           capture_output=True, text=True, env=clean_env(HOME=self.home), timeout=60)
+                           capture_output=True, text=True, env=clean_env(HOME=self.home, USERPROFILE=self.home), timeout=60)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("cost-daily", r.stderr.replace(udir, ""))   # no complaint about our units
 
-    @unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq/bash not available")
+    # the Windows install ships statusline.ps1 only (no statusline.sh), so this bash render has nothing to run there
+    @unittest.skipUnless(shutil.which("jq") and BASH and os.name != "nt", "jq/bash not available, or Windows (statusline.ps1 install)")
     def test_status_line_segments_follow_the_opt_out(self):
         payload = json.dumps({"model": {"id": "claude-x", "display_name": "X"}, "workspace": {"current_dir": self.home},
                               "prompt_cache": {"hit_ratio": 0.93, "misses": 2}, "cost": {"total_cost_usd": 1.2345}})
 
         def line(**env):
-            e = clean_env(HOME=self.home, **env)
-            return subprocess.run(["bash", os.path.join(self.claude, "statusline.sh")], input=payload, capture_output=True, text=True, env=e, timeout=60).stdout
+            e = clean_env(HOME=self.home, USERPROFILE=self.home, **env)
+            return subprocess.run([BASH, os.path.join(self.claude, "statusline.sh")], input=payload, capture_output=True, text=True, env=e, timeout=60).stdout
         self.assertEqual(self.install("--free").returncode, 0)
         self.assertNotIn("cache ", line())                                   # opted out: nothing added
         self.assertNotIn("session $", line())

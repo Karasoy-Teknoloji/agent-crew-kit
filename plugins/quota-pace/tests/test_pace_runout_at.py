@@ -2,9 +2,10 @@
 (without it the column stays "—" for everyone). A null runout_at (no run-out before the reset) must stay null, not vanish.
 Run: python3 -I -m unittest discover -s plugins/quota-pace/tests -p 'test_pace_runout_at.py'"""
 import json, os, shutil, subprocess, tempfile, time, unittest
+from bash_bul import BASH  # Git Bash on Windows, never the WSL launcher in System32
 
 PLUG = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-HAVE = shutil.which("bash") and shutil.which("jq")
+HAVE = BASH and shutil.which("jq")
 
 
 @unittest.skipUnless(HAVE, "bash and jq required")
@@ -28,8 +29,8 @@ class RunoutAt(unittest.TestCase):
         data = json.dumps({"model": {"display_name": "X", "id": "x"}, "workspace": {"current_dir": "/"}, "rate_limits": {
             "five_hour": {"used_percentage": 10, "resets_at": self.now + 3 * 3600},
             "seven_day": {"used_percentage": 94, "resets_at": self.reset}}})
-        env = dict(os.environ, HOME=self.home)
-        subprocess.run(["bash", os.path.join(PLUG, "statusline.sh")], input=data, text=True, env=env, capture_output=True, timeout=60)
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
+        subprocess.run([BASH, os.path.join(PLUG, "statusline.sh")], input=data, text=True, env=env, capture_output=True, timeout=60)
         with open(os.path.join(self.claude, "pace.json"), encoding="utf-8") as f:
             return json.load(f)
 

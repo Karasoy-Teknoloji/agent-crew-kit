@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(PLUG, "bin"))
 import last_window as S  # noqa: E402
 
 REAL_TAB = S.TabSession      # the real Windows tab class (the scene replaces it with a fake by default)
+SESSION_CLASS = "TabSession" if os.name == "nt" else "TmuxSession"   # the class main() picks for its own session
 
 H = 3600
 NOW = 1_800_000_000
@@ -576,7 +577,7 @@ class Working(unittest.TestCase):
         path = self.session("Alpha")
         self.pace(3 * H)
         env = {k: v for k, v in os.environ.items() if k not in ("PACE_TARGET_HOURS", "XDG_CONFIG_HOME")}
-        env.update(HOME=self.home, CLAUDE_CONFIG_DIR=self.claude, LAST_WINDOW_CLAUDE=self.fake, LAST_WINDOW_TMUX=self.tmux, LAST_WINDOW_CHOICE=self.choice,
+        env.update(HOME=self.home, USERPROFILE=self.home, CLAUDE_CONFIG_DIR=self.claude, LAST_WINDOW_CLAUDE=self.fake, LAST_WINDOW_TMUX=self.tmux, LAST_WINDOW_CHOICE=self.choice,
                    LAST_WINDOW_POLL="0.2", LAST_WINDOW_ACK_SEC="5", FAKE_MARK=self.mark, FAKE_TRANSCRIPT=path, FAKE_TMUX_STATE=self.tstate,
                    CLAUDE_SHARED_REMOTE=self.remote, CLAUDE_SHARED_LAST_WINDOW_CLONE=self.clone, CLAUDE_SHARED_PERSON="Emre",
                    GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
@@ -662,7 +663,7 @@ class Working(unittest.TestCase):
         self.pace(8 * H)
         code = ("import runpy, sys; sys.stdout = None; sys.stderr = None; sys.argv = ['last-window', 'trigger']; "
                "runpy.run_path(%r, run_name='__main__')" % SP)
-        env = dict(os.environ, HOME=self.home, CLAUDE_CONFIG_DIR=self.claude, PACE_TARGET_HOURS="5")
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home, CLAUDE_CONFIG_DIR=self.claude, PACE_TARGET_HOURS="5")
         env.pop("LAST_WINDOW_DIR", None)
         r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, env=env, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -1016,7 +1017,7 @@ class Stage(StageBase):
 
     # --- finding 2: our own session never outlives the wrapper
     def test_an_exception_after_the_start_stops_our_own_session_and_records_the_run(self):
-        S.TmuxSession.error = RuntimeError("boom")
+        getattr(S, SESSION_CLASS).error = RuntimeError("boom")
         k = self.run_cmd()
         self.assertEqual(len(self.launched), 1)
         self.assertEqual(self.launched[0].stopped, 1)
@@ -1024,7 +1025,7 @@ class Stage(StageBase):
         self.assertIn("RuntimeError: boom", self.log())
 
     def test_a_signal_after_the_start_stops_our_own_session(self):
-        S.TmuxSession.error = S.Stopped()
+        getattr(S, SESSION_CLASS).error = S.Stopped()
         k = self.run_cmd()
         self.assertEqual(self.launched[0].stopped, 1)
         self.assertEqual(k["reason"], "stopped")
@@ -1073,7 +1074,7 @@ class StageTab(StageBase):
         from unittest import mock
         self.killed, self.opened = [], []
         self.tab_pid = self.helper_pid()
-        for name, v in (("TmuxSession", REAL_TAB), ("_taskkill", self.killed.append), ("_sid_processes", lambda sid: [4242])):
+        for name, v in ((SESSION_CLASS, REAL_TAB), ("_taskkill", self.killed.append), ("_sid_processes", lambda sid: [4242])):
             p = mock.patch.object(S, name, v)
             p.start()
             self.addCleanup(p.stop)
@@ -1131,6 +1132,11 @@ class Forward(unittest.TestCase):
         with open(self.fake, "w") as f:
             f.write("#!%s\n%s" % (sys.executable, FAKE_ROLE))
         os.chmod(self.fake, 0o755)
+        if os.name == "nt":                                    # Windows runs no shebang: a .cmd shim starts the fake with this interpreter
+            shim = os.path.join(self.root, "fake_claude.cmd")
+            with open(shim, "w") as f:
+                f.write('@"%s" "%s" %%*' % (sys.executable, self.fake) + chr(10))
+            self.fake = shim
         from unittest import mock
         for name, v in (("DIR", self.root), ("HOME", self.root)):
             p = mock.patch.object(S, name, v)

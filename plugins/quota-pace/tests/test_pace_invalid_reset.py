@@ -1,10 +1,11 @@
 """A weekly limit without a real reset time must not change the pace mode (statusline.sh + pace-hook.py).
 Payload A: overall limit with a valid reset.  Payload B: the bogus shape seen in practice (resets_at 4102444800 = year 2100, 20%/10%),
 plus a model-specific weekly limit next to the overall one. Run: python3 -I -m unittest discover -s plugins/quota-pace/tests"""
-import json, os, shutil, subprocess, tempfile, time, unittest
+import json, os, shutil, subprocess, sys, tempfile, time, unittest
+from bash_bul import BASH  # Git Bash on Windows, never the WSL launcher in System32
 
 PLUG = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-HAVE = shutil.which("bash") and shutil.which("jq")
+HAVE = BASH and shutil.which("jq")
 
 
 def payload(now, seven, five, extra=None):
@@ -26,12 +27,12 @@ class InvalidReset(unittest.TestCase):
         shutil.rmtree(self.home, ignore_errors=True)
 
     def status(self, data):
-        env = dict(os.environ, HOME=self.home)
-        return subprocess.run(["bash", os.path.join(PLUG, "statusline.sh")], input=data, text=True, env=env, capture_output=True, timeout=60).stdout
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
+        return subprocess.run([BASH, os.path.join(PLUG, "statusline.sh")], input=data, text=True, env=env, capture_output=True, timeout=60).stdout
 
     def hook(self):
-        env = dict(os.environ, HOME=self.home)
-        return subprocess.run(["python3", "-I", os.path.join(PLUG, "bin", "pace-hook.py")], input='{"session_id":"t","hook_event_name":"SessionStart"}',
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home)
+        return subprocess.run([sys.executable, "-I", os.path.join(PLUG, "bin", "pace-hook.py")], input='{"session_id":"t","hook_event_name":"SessionStart"}',
                               text=True, env=env, capture_output=True, timeout=60).stdout
 
     def test_valid_reset_writes_mode(self):

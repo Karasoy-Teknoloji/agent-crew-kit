@@ -2,8 +2,18 @@ name: statusline-platforms
 
 # Manual only (org rule: no push triggers). Not a required check: it proves that the quota-pace status line installs and renders
 # the same segments on Linux, macOS and Windows.
+# Runners (karasoy-infra ops#101, org decision 2026-11-10: GitHub-hosted runners and paid GitHub features are never used, public repos included):
+# Linux runs on the ci-kapi-linux pool (repo variable RUNNER_KAPI_LINUX), Windows on ci-win-2 (runner group ci-win-ikinci; the group admits only the workflow
+# paths listed in karasoy-infra ci-linux/github-org.conf). macOS targets the self-hosted macOS runner `ci-macos` (karasoy-infra ci-macos/, ops#129);
+# it starts only with macos=true, and that dispatch waits in the queue while no such runner is online. Fork PRs need an owner's approval for every
+# external contributor (this workflow has no PR trigger anyway); read-only token, no secrets.
 on:
   workflow_dispatch:
+    inputs:
+      macos:
+        description: "Also run the macOS job on the self-hosted macOS runner (queues until one is online)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -11,25 +21,94 @@ permissions:
 jobs:
   render:
     name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'windows' && fromJSON('["self-hosted","Windows","ci-win-2"]') || matrix.os == 'macos' && fromJSON('["ci-macos"]') || fromJSON(vars.RUNNER_KAPI_LINUX || '["ci-kapi-linux"]') }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(inputs.macos && '["linux","macos","windows"]' || '["linux","windows"]') }}
     steps:
+      - name: Git for Windows bash on PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $b = 'C:\Program Files\Git\bin'
+          if (-not (Test-Path "$b\bash.exe")) { throw "bash.exe not found under $b (Git for Windows missing on this runner)" }
+          Add-Content -Path $env:GITHUB_PATH -Value $b
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
+        if: runner.os != 'Windows'
         with:
           python-version: "3.12"
 
-      - name: jq (the Linux/macOS status line needs it; install.sh refuses to install without it)
+      # ci-win-2 runs as a service account without admin: setup-python's Windows installer needs HKLM (Remove-Item registry error), so the
+      # same CPython 3.12 comes from the nuget.org `python` package (a plain zip: download + extract, no installer, no registry) and goes on PATH for this job.
+      - name: Python 3.12 from NuGet (Windows self-hosted)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $out = Join-Path $env:RUNNER_TEMP 'py'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          foreach ($v in '3.12.10','3.12.9','3.12.8','3.12.7') {
+            $pkg = Join-Path $out "python.$v.zip"
+            try { Invoke-WebRequest -UseBasicParsing "https://api.nuget.org/v3-flatcontainer/python/$v/python.$v.nupkg" -OutFile $pkg } catch { Write-Host "python $v : $($_.Exception.Message)"; continue }
+            Expand-Archive -LiteralPath $pkg -DestinationPath (Join-Path $out "python.$v") -Force
+            $exe = Join-Path $out "python.$v/tools/python.exe"
+            if (Test-Path $exe) { break }
+          }
+          if (-not (Test-Path $exe)) { throw 'python nuget package could not be downloaded' }
+          # GitHub-hosted Windows images put python3 on PATH; the installer's tool check and statusline.ps1 call `python3`, so the zip's python.exe gets that name too.
+          Copy-Item -LiteralPath $exe -Destination (Join-Path (Split-Path $exe) 'python3.exe') -Force
+          Add-Content -Path $env:GITHUB_PATH -Value (Split-Path $exe)
+          & $exe --version
+
+      # The same hosted images carry gh and jq, which the installer's tool check treats as required (the tests must not depend on the host having them).
+      # Pinned release assets (sha256 from the release metadata), plain downloads: no installer, no admin.
+      - name: gh and jq (Windows self-hosted)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $d = Join-Path $env:RUNNER_TEMP 'tools'
+          New-Item -ItemType Directory -Force -Path $d | Out-Null
+          function Get-Pinned($url, $sha, $out) {
+            Invoke-WebRequest -UseBasicParsing $url -OutFile $out
+            if ((Get-FileHash -Algorithm SHA256 $out).Hash.ToLower() -ne $sha) { throw "sha256 mismatch: $url" }
+          }
+          Get-Pinned 'https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe' 'a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627' (Join-Path $d 'jq.exe')
+          $zip = Join-Path $d 'gh.zip'
+          Get-Pinned 'https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_windows_amd64.zip' '98d0cfa794721665d7973dd728c78aff7bd836d58f10f6d7a03568eccb0a22e0' $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $d 'gh') -Force
+          Copy-Item -LiteralPath (Join-Path $d 'gh/bin/gh.exe') -Destination (Join-Path $d 'gh.exe') -Force
+          Add-Content -Path $env:GITHUB_PATH -Value $d
+          & (Join-Path $d 'jq.exe') --version
+          & (Join-Path $d 'gh.exe') --version
+
+      # The status line is a jq program and install.sh refuses to install without jq. The self-hosted runners have no sudo (and the macOS runner cannot
+      # brew install): jq must be part of the runner image, otherwise this step fails with that message instead of installing it.
+      - name: jq present (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          command -v jq >/dev/null 2>&1 || { if [ "$RUNNER_OS" = macOS ]; then brew install jq; else sudo apt-get install -y jq; fi; }
+          command -v jq >/dev/null 2>&1 || { echo "::error::jq is not on this $RUNNER_OS runner image"; exit 1; }
           jq --version
+
+      # The installer's tool check and gh shim need a real gh (hosted images carry one; the kapi pool image does not, and has no sudo): pinned release asset.
+      - name: gh (Linux self-hosted)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          command -v gh >/dev/null 2>&1 || {
+            d="$RUNNER_TEMP/gh-cli"; mkdir -p "$d"
+            curl -fsSL -o "$d/gh.tgz" https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz
+            echo "4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d  $d/gh.tgz" | sha256sum -c -
+            tar -xzf "$d/gh.tgz" -C "$d" --strip-components=1
+            echo "$d/bin" >> "$GITHUB_PATH"
+          }
+          "$(command -v gh || echo "$RUNNER_TEMP/gh-cli/bin/gh")" --version
 
       - name: Unit tests
         shell: bash
